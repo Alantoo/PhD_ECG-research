@@ -110,6 +110,17 @@ ENV/
 env.bak/
 venv.bak/
 
+#My section
+tasks.txt
+ECG_IEEE_Access_2022/dat/
+ECG_IEEE_Access_2022/mat/
+ECG_IEEE_Access_2022/link_OneDrive_ECG_IEEE_Access_2022.txt
+fr-img/
+img/
+m-file/
+3d-img/
+.vscode
+
 # Spyder project settings
 .spyderproject
 .spyproject
