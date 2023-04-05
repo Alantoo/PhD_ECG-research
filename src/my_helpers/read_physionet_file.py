@@ -19,7 +19,7 @@ class ReadPhysionetFile:
         logger.info(f'Sampling rate: {self.sampling_rate}')
 
     def getData(self):
-        fr_path = f'{self.ecg_config.getFrPath()}/{self.ecg_config.getFileName()}_{self.fileds["sig_name"][self.ecg_config.getSigName()]}.csv'
+        fr_path = f'{self.ecg_config.getFrPath()}/{self.getSigNameDir()}.csv'
         if not Path(fr_path).is_file():
             e = 'The rhythm function file %s does not exist' % fr_path
             logger.error(e)
@@ -48,3 +48,6 @@ class ReadPhysionetFile:
         self.matrix_T_P = matrix_T_P
         self.matrix_P_R = matrix_P_R
         self.matrix_R_T = matrix_R_T
+
+    def getSigNameDir(self):
+        return f'{self.ecg_config.getFileName()}_{self.fileds["sig_name"][self.ecg_config.getSigName()]}'
