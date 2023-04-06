@@ -2,6 +2,7 @@ from loguru import logger
 from get_config.ecg_config import ECGConfig
 from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.data_preparation import DataPreparation
+from my_helpers.fourier_series import FourierSeries
 import sys
 import argparse
 
@@ -22,5 +23,7 @@ if __name__ == '__main__':
         GenerateRhythmFunction(ecg_config).plotFr()
     if a.action == "main":
         data = DataPreparation(ecg_config)
-        data.plotAllCycles()
+        FourierSeries(ecg_config, data)
+        # data.plotAllCycles()
+
         
