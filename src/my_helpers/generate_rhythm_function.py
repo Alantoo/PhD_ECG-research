@@ -27,7 +27,7 @@ class GenerateRhythmFunction(ReadPhysionetFile):
             ecg_fr = pd.DataFrame({"D_c" : ECG_T_Peaks, "D_z_1" : ECG_P_Peaks, "D_z_2" : ECG_R_Peaks})
             nk.write_csv(ecg_fr, f'{self.ecg_config.getFrPath()}/{self.ecg_config.getFileName()}_{self.fileds["sig_name"][i]}.csv')
 
-    def plotFr(self):
+    def plotFr(self, debug = False):
         logger.info("Plot a rhythm function")
 
         self.getData()
@@ -35,32 +35,33 @@ class GenerateRhythmFunction(ReadPhysionetFile):
         plot_path = f'{self.ecg_config.getFrImgPath()}/{self.ecg_config.getFileName()}_{self.fileds["sig_name"][self.ecg_config.getSigName()]}'
         Path(plot_path).mkdir(parents=True, exist_ok=True)
 
-        plt.clf()
-        f, axis = plt.subplots(1)
-        f.tight_layout()
-        f.set_size_inches(17, 4)
-        axis.grid(True)
-        for i in self.matrix_T_P:
-            axis.plot(i, linewidth=2)
-        plt.savefig(f'{plot_path}/1_matrix_T_P.png', dpi=300)
+        if debug :
+            plt.clf()
+            f, axis = plt.subplots(1)
+            f.tight_layout()
+            f.set_size_inches(17, 4)
+            axis.grid(True)
+            for i in self.matrix_T_P:
+                axis.plot(i, linewidth=2)
+            plt.savefig(f'{plot_path}/1_matrix_T_P.png', dpi=300)
 
-        plt.clf()
-        f, axis = plt.subplots(1)
-        f.tight_layout()
-        f.set_size_inches(17, 4)
-        axis.grid(True)
-        for i in self.matrix_P_R:
-            axis.plot(i, linewidth=2)
-        plt.savefig(f'{plot_path}/2_matrix_P_R.png', dpi=300)
+            plt.clf()
+            f, axis = plt.subplots(1)
+            f.tight_layout()
+            f.set_size_inches(17, 4)
+            axis.grid(True)
+            for i in self.matrix_P_R:
+                axis.plot(i, linewidth=2)
+            plt.savefig(f'{plot_path}/2_matrix_P_R.png', dpi=300)
 
-        plt.clf()
-        f, axis = plt.subplots(1)
-        f.tight_layout()
-        f.set_size_inches(17, 4)
-        axis.grid(True)
-        for i in self.matrix_R_T:
-            axis.plot(i, linewidth=2)
-        plt.savefig(f'{plot_path}/3_matrix_R_T.png', dpi=300)
+            plt.clf()
+            f, axis = plt.subplots(1)
+            f.tight_layout()
+            f.set_size_inches(17, 4)
+            axis.grid(True)
+            for i in self.matrix_R_T:
+                axis.plot(i, linewidth=2)
+            plt.savefig(f'{plot_path}/3_matrix_R_T.png', dpi=300)
 
         B_i = len(self.D_z_1) -1
 
@@ -103,5 +104,5 @@ class GenerateRhythmFunction(ReadPhysionetFile):
         axis.set_xlabel("$t, s$", loc = 'right')
         axis.legend(['$T(t, 1), s$'])
         axis.axis(ymin = -0.2, ymax = 1.2)
-        axis.axis(xmin = 0, xmax = 272)
+        axis.axis(xmin = 0)
         plt.savefig(f'{plot_path}/FR.png', dpi=300)

@@ -62,7 +62,7 @@ class DataPreparation(ReadPhysionetFile):
         time = np.arange(0, len(self.interp_matrix_all[0]), 1) / self.mod_sampling_rate
         for i in self.interp_matrix_all:
             axis.plot(time, i, linewidth=2)
-        plt.savefig(f'{plot_path}/1_All_Cycles.png', dpi=300)
+        plt.savefig(f'{plot_path}/__All_Cycles.png', dpi=300)
 
 
     def getNewMatrixSize(self, matrix):
