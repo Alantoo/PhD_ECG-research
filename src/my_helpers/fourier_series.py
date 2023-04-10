@@ -1,10 +1,8 @@
 from loguru import logger
 import numpy as np
-import scipy.interpolate as interp
 from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.integrate import simps
-from scipy.signal import square
 
 class FourierSeries():
 

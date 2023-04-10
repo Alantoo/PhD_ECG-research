@@ -13,26 +13,26 @@ class GenerateRhythmFunction(ReadPhysionetFile):
 
     def genFr(self):
         logger.info("Get ECG Peaks")
+        i = self.ecg_config.getSigName()
 
-        for i in range(2):
-            _, rpeaks = nk.ecg_peaks(self.signals[i], sampling_rate=self.sampling_rate)
-            _, waves = nk.ecg_delineate(self.signals[i], rpeaks, sampling_rate=self.sampling_rate)
-            ECG_T_Peaks = list(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate)
-            ECG_P_Peaks = list(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate)
-            ECG_R_Peaks = list(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate)
-            del ECG_P_Peaks[0]
-            del ECG_R_Peaks[0]
-            ECG_P_Peaks.append(None)
-            ECG_R_Peaks.append(None)
-            ecg_fr = pd.DataFrame({"D_c" : ECG_T_Peaks, "D_z_1" : ECG_P_Peaks, "D_z_2" : ECG_R_Peaks})
-            nk.write_csv(ecg_fr, f'{self.ecg_config.getFrPath()}/{self.ecg_config.getFileName()}_{self.fileds["sig_name"][i]}.csv')
+        _, rpeaks = nk.ecg_peaks(self.signals[i], sampling_rate=self.sampling_rate)
+        _, waves = nk.ecg_delineate(self.signals[i], rpeaks, sampling_rate=self.sampling_rate)
+        ECG_T_Peaks = list(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate)
+        ECG_P_Peaks = list(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate)
+        ECG_R_Peaks = list(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate)
+        del ECG_P_Peaks[0]
+        del ECG_R_Peaks[0]
+        ECG_P_Peaks.append(None)
+        ECG_R_Peaks.append(None)
+        ecg_fr = pd.DataFrame({"D_c" : ECG_T_Peaks, "D_z_1" : ECG_P_Peaks, "D_z_2" : ECG_R_Peaks})
+        nk.write_csv(ecg_fr, f'{self.ecg_config.getFrPath()}/{self.ecg_config.getConfigBlock()}.csv')
 
     def plotFr(self, debug = False):
         logger.info("Plot a rhythm function")
 
         self.getData()
 
-        plot_path = f'{self.ecg_config.getFrImgPath()}/{self.ecg_config.getFileName()}_{self.fileds["sig_name"][self.ecg_config.getSigName()]}'
+        plot_path = f'{self.ecg_config.getFrImgPath()}/{self.ecg_config.getConfigBlock()}'
         Path(plot_path).mkdir(parents=True, exist_ok=True)
 
         if debug :

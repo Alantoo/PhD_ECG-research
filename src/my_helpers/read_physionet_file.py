@@ -50,4 +50,4 @@ class ReadPhysionetFile:
         self.matrix_R_T = matrix_R_T
 
     def getSigNameDir(self):
-        return f'{self.ecg_config.getFileName()}_{self.fileds["sig_name"][self.ecg_config.getSigName()]}'
+        return f'{self.ecg_config.getConfigBlock()}'
