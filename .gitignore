@@ -121,6 +121,8 @@ img/
 m-file/
 3d-img/
 .vscode
+База даних ЕКГ/
+XLS_ECG_data/
 
 # Spyder project settings
 .spyderproject

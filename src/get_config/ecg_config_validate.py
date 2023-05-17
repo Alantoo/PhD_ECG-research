@@ -20,6 +20,7 @@ class ECGConfigConfig(ConfigParser):
         required_values = {
             'DEFAULT': {
                 'data_path' : None,
+                'xls_data_path' : None,
                 'fr_path' : None,
                 'img_path' : None,
                 'fr_img_path' : None
@@ -27,7 +28,9 @@ class ECGConfigConfig(ConfigParser):
             '%s' % (config_block): {
                 'sig_name' : None,
                 'file_name': None,
-                'multiplier': None
+                'multiplier': None,
+                'pathology': None,
+                'data_type': ('xlsx', 'physionet')
             }
         }
 

@@ -7,7 +7,6 @@ from scipy.integrate import simps
 class FourierSeries():
 
     def __init__(self, ecg_config, data):
-        print("Test")
         self.all_matrix = data.getPreparedData()
         self.sampling_rate = data.getModSamplingRate()
         self.ecg_config = ecg_config
@@ -15,7 +14,7 @@ class FourierSeries():
         Path(self.plot_path).mkdir(parents=True, exist_ok=True)
 
 
-    def getFourierSpectrum(self, signals, terms = 50):
+    def getFourierSpectrum(self, signals, terms = 30):
         for i in signals:
             self.plotSpectrum(i, terms)
 
@@ -29,27 +28,33 @@ class FourierSeries():
         abs_list_b = np.abs(list_b)
 
         plt.clf()
-        plt.rcParams.update({'font.size': 14})
+        plt.rcParams.update({'font.size': 16})
         f, axis = plt.subplots(1)
         f.tight_layout()
         f.set_size_inches(19, 6)
+        axis.set_xlabel("$n$", loc = 'right')
+        axis.set_title("$a_n, mV$", loc = 'left', fontsize=15, position=(-0.05, 0))
         axis.grid(True)
-        axis.stem(abs_list_a, markerfmt=" ")
+        _, stemlines, _ = axis.stem(abs_list_a)
+        plt.setp(stemlines, 'linewidth', 3)
         plt.savefig(f'{self.plot_path}/{signal}_Example_a_n.png', dpi=300)
 
         plt.clf()
-        plt.rcParams.update({'font.size': 14})
+        plt.rcParams.update({'font.size': 16})
         f, axis = plt.subplots(1)
         f.tight_layout()
         f.set_size_inches(19, 6)
+        axis.set_xlabel("$n$", loc = 'right')
+        axis.set_title("$b_n, mV$", loc = 'left', fontsize=15, position=(-0.05, 0))
         axis.grid(True)
-        axis.stem(abs_list_b, markerfmt=" ")
+        _, stemlines, _ = axis.stem(abs_list_b)
+        plt.setp(stemlines, 'linewidth', 3)
         plt.savefig(f'{self.plot_path}/{signal}_Example_b_n.png', dpi=300)
 
 
     def getFourierSeriesDemonstration(self, signal):
         fourier_series = self.getFourierSeries(self.all_matrix[signal])
-        for terms in [2, 3, 5, 10, 20, 30, 40, 50]:
+        for terms in [3, 10, 20, 30, 40, 50, 60]:
             self.plotFourierSeriesDemonstration(*fourier_series, terms, signal)
 
     def plotFourierSeriesDemonstration(self, a0, an, bn, x, y, terms, i, L = 1):
@@ -57,15 +62,17 @@ class FourierSeries():
         s=a0/2.+sum([an(k)*np.cos(2.*np.pi*k*x/L)+bn(k)*np.sin(2.*np.pi*k*x/L) for k in range(1,terms+1)])
 
         plt.clf()
-        plt.rcParams.update({'font.size': 14})
+        plt.rcParams.update({'font.size': 16})
         f, axis = plt.subplots(1)
         f.tight_layout()
         f.set_size_inches(19, 6)
         axis.grid(True)
+        axis.axis(ymin = -0.53, ymax = 0.33)
         axis.set_xlabel("$t, s$", loc = 'right')
-        axis.plot(x,s,label="Fourier series", linewidth=2)
-        axis.plot(x,y,label="Original square wave", linewidth=2)
-        axis.legend(loc='best',prop={'size':10})
+        axis.set_title("mV", loc = 'left', fontsize=15, position=(-0.03, 0))
+        axis.plot(x,s,label="Fourier series", linewidth=3)
+        axis.plot(x,y,label="Averaged ECG cycle", linewidth=3)
+        axis.legend(loc='best',prop={'size':16})
         Path(f'{self.plot_path}/Fourier Series Demonstration').mkdir(parents=True, exist_ok=True)
         plt.savefig(f'{self.plot_path}/Fourier Series Demonstration/{i}_Example_c_{terms}.png', dpi=300)
 

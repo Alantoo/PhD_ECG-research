@@ -1,11 +1,11 @@
 from loguru import logger
-from my_helpers.read_physionet_file import ReadPhysionetFile
+from my_helpers.read_data.read_data_file import ReadDataFile
 import numpy as np
 import scipy.interpolate as interp
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-class DataPreparation(ReadPhysionetFile):
+class DataPreparation(ReadDataFile):
 
     def __init__(self, ecg_config):
         super().__init__(ecg_config)
@@ -40,7 +40,9 @@ class DataPreparation(ReadPhysionetFile):
             arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_R_T_size))
             interp_matrix_R_T.append(arr_stretch)
 
-        interp_matrix_all = np.concatenate((interp_matrix_P_R[:-1], interp_matrix_R_T[:-1], interp_matrix_T_P[1:]), axis=1)
+        interp_matrix_all = np.concatenate((interp_matrix_P_R, interp_matrix_R_T, interp_matrix_T_P), axis=1)
+
+        plot_path = f'{self.ecg_config.getFrImgPath()}/{self.ecg_config.getConfigBlock()}'
 
         for i in range(len(interp_matrix_all)):
             arr = np.array(interp_matrix_all[i])
@@ -70,6 +72,7 @@ class DataPreparation(ReadPhysionetFile):
         for i in range(len(matrix)):
             n = n + len(matrix[i])
         n = int((n / len(matrix)) * self.ecg_config.getMultiplier())
+        # n = int(len(matrix[0]) * self.ecg_config.getMultiplier())
         return n
     
     def getModSamplingRate(self):

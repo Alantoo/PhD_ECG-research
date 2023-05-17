@@ -18,6 +18,18 @@ class MathematicalStatistics(MathematicalStatisticsData):
         #Central moment functions of the fourth order
         self.m__4 = [sum((data[i] - self.m_[i])**4) / len(data[i]) for i in range(len(self.m_))]
 
+    def getMathematicalStatistics(self):
+        return MathematicalStatisticsData(self.m_, self.m_2_, self.m_3_, self.m_4_, self.m__2, self.m__4)
+    
+    def getMathematicalStatisticsFourierSeries(self):
+        m_f = self.getFourierSeries(self.m_)
+        m_2_f = self.getFourierSeries(self.m_2_)
+        m_3_f = self.getFourierSeries(self.m_3_)
+        m_4_f = self.getFourierSeries(self.m_4_)
+        m__2_f = self.getFourierSeries(self.m__2)
+        m__4_f = self.getFourierSeries(self.m__4)
+        return MathematicalStatisticsData(m_f, m_2_f, m_3_f, m_4_f, m__2_f, m__4_f)
+
     def getMean(self, other):
         m_ = np.mean(np.abs(np.subtract(self.m_, other.m_)))
         m_2_ = np.mean(np.abs(np.subtract(self.m_2_, other.m_2_)))
