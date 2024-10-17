@@ -1,6 +1,3 @@
-from authentication.authentication import Authentication
-from authentication.ft_authentication import Authentication as FTAuthentication
-from authentication.hurst_index import HurstIndex
 from classifiers_test.test import Test
 from classifiers_test.test_src import Test as Test_src
 from loguru import logger
@@ -15,7 +12,6 @@ from my_helpers.classifiers import Classifiers
 from my_helpers.test_classifiers import TestClassifiers
 from my_helpers.plot_classifier import PlotClassifier
 from my_helpers.test_diff_fr import TestDiffFr
-from napolitano.napolitano import Napolitano
 import sys
 import argparse
 import os
@@ -23,14 +19,12 @@ import time
 
 from napolitano.plot_classifiers import PlotClassifiers
 from classifiers_test.plot_classifiers import PlotClassifiers as PlotClassifiers2
-from no_classifires_test.no_classifires import NoClassidire
 
 if __name__ == '__main__':
-
     logger.info("ECG Research")
     # time.sleep(10)
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('qq-plot','get-hurst-index', 'plot-n', 'plot-n-ft', 'authentication-diff', 'ft-authentication-diff', 'ft-authentication-test', 'authentication-test', 'no-all-test','no-all-mean', 'no-all-sigma', 'test-classifier-src', 'plot-classifier2', 'test-classifier2', 'plot-classifier', 'napolitano-test','napolitano-plot-red', 'show-intervals', 'test-classifier', 'diff-test', 'plot-ekg', 'get-intervals', 'gen-intervals', 'gen-fr', 'plot-fr', 'main', 'fourier-series-demonstration', 'fourier-series-test-1', 'train_classifier', 'plot_classifier', 'plot-statistics', 'plot-fourier-statistics', 'plot-autocorrelation', 'plot-autocovariation'))
+    parser.add_argument('action', choices=('test-classifier-src', 'plot-classifier2', 'test-classifier2', 'plot-classifier', 'show-intervals', 'test-classifier', 'diff-test', 'plot-ekg', 'get-intervals', 'gen-intervals', 'gen-fr', 'plot-fr', 'main', 'fourier-series-demonstration', 'fourier-series-test-1', 'train_classifier', 'plot_classifier', 'plot-statistics', 'plot-fourier-statistics', 'plot-autocorrelation', 'plot-autocovariation'))
     parser.add_argument('-c', type=str, required=True)
     parser.add_argument('-d', type=str)
     parser.add_argument('-s', type=str)
@@ -39,28 +33,6 @@ if __name__ == '__main__':
     logger.debug("Read config file")
     ecg_config = ECGConfig(config_block)
     logger.debug(ecg_config)
-    if a.action == "get-hurst-index":
-        HurstIndex(ecg_config)
-    if a.action == "ft-authentication-test":
-        FTAuthentication(ecg_config).Classifiers()
-    if a.action == "authentication-test":
-        Authentication(ecg_config).Classifiers()
-    if a.action == "plot-n-ft":
-        FTAuthentication(ecg_config).Plot_n()
-    if a.action == "plot-n":
-        Authentication(ecg_config).Plot_n()
-    if a.action == "qq-plot":
-        Authentication(ecg_config).QQplot()
-    if a.action == "authentication-diff":
-        Authentication(ecg_config).Diff()
-    if a.action == "ft-authentication-diff":
-        FTAuthentication(ecg_config).Diff()
-    if a.action == "no-all-test":
-        NoClassidire(ecg_config).NoTest()
-    if a.action == "no-all-sigma":
-        NoClassidire(ecg_config).NoAllSigma()
-    if a.action == "no-all-mean":
-        NoClassidire(ecg_config).NoAllMean()
     if a.action == "test-classifier-src":
         Test_src(ecg_config).TestRed()
     if a.action == "plot-classifier2":
@@ -68,15 +40,9 @@ if __name__ == '__main__':
     if a.action == "test-classifier2":
         # for i in range(1, 31):
         #     Test(ecg_config).TestRed(i)
-        Test(ecg_config).TestRed(15)
+        Test(ecg_config).TestRed(1)
     if a.action == "plot-classifier":
         PlotClassifiers(ecg_config)
-    if a.action == "napolitano-test":
-        # for i in range(1, 201):
-        #     Napolitano(ecg_config).TestRed(i)
-        Napolitano(ecg_config).TestRed(1)
-    if a.action == "napolitano-plot-red":
-        Napolitano(ecg_config).PlotDataRed()
     if a.action == "diff-test":
         TestDiffFr(ecg_config).getTestData()
     if a.action == "show-intervals":
@@ -96,17 +62,17 @@ if __name__ == '__main__':
         FourierSeries(ecg_config, data).getFourierSeriesDemonstration(int(a.s or 0))
     if a.action == "fourier-series-test-1":
         data = DataPreparation(ecg_config)
-        # data.plotAllCycles()
+        data.plotAllCycles()
         # FourierSeries(ecg_config, data).getFourierSpectrum([1, 3, 10])
     if a.action == "plot-statistics":
         data = DataPreparation(ecg_config)
         statistics = MathematicalStatistics(data.getPreparedData())
 
         # path = f'{ecg_config.getImgPath()}/All Mean/CSV/Arrhythmia Mathematical Expectation.csv'
-        # path = f'{ecg_config.getImgPath()}/All Mean/CSV/Healthy Mathematical Expectation.csv'
-        # df = pd.read_csv(path)
-        # no_mean = df["Data"]
-        # statistics.setNoVariance(no_mean)
+        path = f'{ecg_config.getImgPath()}/All Mean/CSV/Healthy Mathematical Expectation.csv'
+        df = pd.read_csv(path)
+        no_mean = df["Data"]
+        statistics.setNoVariance(no_mean)
 
         PlotStatistics(statistics, data.getModSamplingRate(), ecg_config, data.getPreparedData()).plotAllStatistics()
 

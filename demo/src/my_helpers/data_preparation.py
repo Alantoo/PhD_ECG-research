@@ -13,17 +13,18 @@ class DataPreparation(ReadDataFile):
 
         self.mod_sampling_rate = int(self.sampling_rate * self.ecg_config.getMultiplier())
 
-        matrix_T_P_size = self.getNewMatrixSize(self.matrix_T_P)
-        matrix_P_R_size = self.getNewMatrixSize(self.matrix_P_R)
-        matrix_R_T_size = self.getNewMatrixSize(self.matrix_R_T)
+        # matrix_T_P_size = self.getNewMatrixSize(self.matrix_T_P)
+        # matrix_P_R_size = self.getNewMatrixSize(self.matrix_P_R)
+        # matrix_R_T_size = self.getNewMatrixSize(self.matrix_R_T)
+
+        matrix_T_P_size = 153
+        matrix_P_R_size = 60
+        matrix_R_T_size = 98
 
         # print(matrix_T_P_size)
         # print(matrix_P_R_size)
         # print(matrix_R_T_size)
 
-        matrix_T_P_size = 145
-        matrix_P_R_size = 48
-        matrix_R_T_size = 83
 
         interp_matrix_T_P = []
         interp_matrix_P_R = []
@@ -50,7 +51,7 @@ class DataPreparation(ReadDataFile):
 
         interp_matrix_all = np.concatenate((interp_matrix_P_R, interp_matrix_R_T, interp_matrix_T_P), axis=1)
 
-        # self.interp_matrix_all = interp_matrix_all
+        plot_path = f'{self.ecg_config.getFrImgPath()}/{self.ecg_config.getConfigBlock()}'
 
         for i in range(len(interp_matrix_all)):
             arr = np.array(interp_matrix_all[i])
@@ -80,15 +81,11 @@ class DataPreparation(ReadDataFile):
         for i in range(len(matrix)):
             n = n + len(matrix[i])
         n = int((n / len(matrix)) * self.ecg_config.getMultiplier())
-        n = int(len(matrix[0]) * self.ecg_config.getMultiplier())
+        # n = int(len(matrix[0]) * self.ecg_config.getMultiplier())
         return n
     
     def getModSamplingRate(self):
         return self.mod_sampling_rate
     
     def getPreparedData(self):
-        m_m = np.mean(self.interp_matrix_all, 1)
-
-        return self.interp_matrix_all - m_m[:,None]
-        # return self.interp_matrix_all
-    
+        return self.interp_matrix_all

@@ -17,55 +17,40 @@ class PlotStatistics():
 
     def plotAutocorrelation(self):
         logger.info("Plot Autocorrelation")
-        # c1 = self.getCorrelation(correlation = False, deep = 1, multiply = False)
-        # self._3d_plot_to_file(c1, "Autocorrelation function d-1 m-f", "Autocorrelation", size=(10, 10, 10), ztext=r'$\hat{C}_{2_{\xi}} (t_1, t_2), mV^2$')
-        # c2 = self.getCorrelation(correlation = False, deep = 3, multiply = False)
-        # self._3d_plot_to_file(c2, "Autocorrelation function d-3 m-f", "Autocorrelation", size=(10, 10, 10), ztext=r'$\hat{C}_{2_{\xi}} (t_1, t_2), mV^2$')
-        c3 = self.getCorrelation(correlation = False, deep = 3, multiply = True)
-        self._3d_plot_to_file(c3, "Autocorrelation function d-3 m-t", "Autocorrelation", size=(10, 10, 10), ztext=r'$\hat{C}_{2_{\xi}} (t_1, t_2), NU^2$')
-        # self._3d_plot_to_file(c3, "L-Autocorrelation function d-3 m-t", "Autocorrelation", size=(10, 10, 10), ztext=r'${\widehat{C}}_{\xi_{\hat{T}_{av}}}^2 (t_1, t_2), NU^2$')
-        
+        c1 = self.getCorrelation(correlation = False, deep = 1, multiply = False)
+        self._3d_plot_to_file(c1, "Autocorrelation function d-1 m-f", "Autocorrelation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
+        c2 = self.getCorrelation(correlation = False, deep = 3, multiply = False)
+        self._3d_plot_to_file(c2, "Autocorrelation function d-3 m-f", "Autocorrelation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
 
-    def plotAutocovariation(self):
+    def plotAutocovariation(self, ):
         logger.info("Plot Autocovariation")
-        # c1 = self.getCorrelation(correlation = True, deep = 1, multiply = False)
-        # self._3d_plot_to_file(c1, "Autocovariation function d-1 m-f", "Autocovariation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
-        # c2 = self.getCorrelation(correlation = True, deep = 3, multiply = False)
-        # self._3d_plot_to_file(c2, "Autocovariation function d-3 m-f", "Autocovariation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
+        c1 = self.getCorrelation(correlation = True, deep = 1, multiply = False)
+        self._3d_plot_to_file(c1, "Autocovariation function d-1 m-f", "Autocovariation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
+        c2 = self.getCorrelation(correlation = True, deep = 3, multiply = False)
+        self._3d_plot_to_file(c2, "Autocovariation function d-3 m-f", "Autocovariation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
         c3 = self.getCorrelation(correlation = True, deep = 3, multiply = True)
-        self._3d_plot_to_file(c3, "Autocovariation function d-3 m-t", "Autocovariation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), NU^2$')
-        # self._3d_plot_to_file(c3, "L-Autocovariation function d-3 m-t", "Autocovariation", size=(10, 10, 10), ztext=r'${\widehat{R}}_{\xi_{\hat{T}_{av}}}^2 (t_1, t_2), NU^2$')
+        self._3d_plot_to_file(c3, "Autocovariation function d-3 m-t", "Autocovariation", size=(10, 10, 10), ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), mV^2$')
 
     def plotAllStatistics(self):
         logger.info("Plot Mathematical Statistics")
         mathematical_statistics = self.statistics.getMathematicalStatistics()
         xtext = "$t, s$"
-        # self.plot_to_png([*mathematical_statistics.getMathematicalExpectation()] * 6, "1 Mathematical Expectation", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\omega}} (t), NU$")
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsSecondOrder()] * 6, "2 Initial Moments Second Order", xtext=xtext, ytext=r"${\widehat{m}}_{\xi_{\omega}}^2 (t), NU^2$")
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsThirdOrder()] * 6, "3 Initial Moments Third Order", xtext=xtext, ytext=r"${\widehat{m}}_{\xi_{\omega}}^3 (t), NU^3$")
-        # self.plot_to_png([*mathematical_statistics.getVariance()] * 6, "5 Variance", xtext=xtext, ytext=r"${\widehat{d}}_{\xi_{\omega}}^2 (t), NU^2$")
-
-        # self.plot_to_png([*mathematical_statistics.getMathematicalExpectation()] * 6, "1 Mathematical Expectation", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\hat{T}_{av}}} (t), NU$")
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsSecondOrder()] * 6, "2 Initial Moments Second Order", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\hat{T}_{av}}}^2 (t), NU^2$")
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsThirdOrder()] * 6, "3 Initial Moments Third Order", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\hat{T}_{av}}}^3 (t), NU^3$")
-        # self.plot_to_png([*mathematical_statistics.getVariance()] * 6, "5 Variance", xtext=xtext, ytext=r"$\widehat{d}_{\xi_{\hat{T}_{av}}}^2 (t), NU^2$")
-
-
-
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsFourthOrder()] * 6, "4 Initial Moments Fourth Order", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^4$")
-        
-        # self.plot_to_png(mathematical_statistics.getVariance(), "No Variance", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^2$")
-        # self.plot_to_png(np.sqrt(mathematical_statistics.getVariance()), "No Sigma", xtext=xtext, ytext=r"$\hat{\sigma}_{{\xi}} (N), mV$")
-        # self.plot_to_png(mathematical_statistics.getCentralMomentFunctionsFourthOrder(), "6 Central Moment Functions Fourth Order",  xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^4$")є
-        # self.plot_to_png(np.sqrt(mathematical_statistics.getVariance()), "No Sigma", xtext=xtext, ytext=r"$\hat{\sigma}_{{\xi}} (N), mV$")
+        # self.plot_to_png(mathematical_statistics.getMathematicalExpectation(), "1 Mathematical Expectation", xtext=xtext, ytext=r"$m_{{\xi}} (t), mV$")
+        # self.plot_to_png(mathematical_statistics.getInitialMomentsSecondOrder(), "2 Initial Moments Second Order", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^2$")
+        # self.plot_to_png(mathematical_statistics.getInitialMomentsThirdOrder(), "3 Initial Moments Third Order", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^3$")
+        # self.plot_to_png(mathematical_statistics.getInitialMomentsFourthOrder(), "4 Initial Moments Fourth Order", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^4$")
+        # self.plot_to_png(mathematical_statistics.getVariance(), "5 Variance", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^2$")
+        self.plot_to_png(mathematical_statistics.getVariance(), "No Variance", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^2$")
+        self.plot_to_png(np.sqrt(mathematical_statistics.getVariance()), "No Sigma", xtext=xtext, ytext=r"$d_{{\xi}} (t), mV$")
+        # self.plot_to_png(mathematical_statistics.getCentralMomentFunctionsFourthOrder(), "6 Central Moment Functions Fourth Order",  xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^4$")
  
         # self.plot_to_csv(mathematical_statistics.getMathematicalExpectation(), "1 Mathematical Expectation")
         # self.plot_to_csv(mathematical_statistics.getInitialMomentsSecondOrder(), "2 Initial Moments Second Order")
         # self.plot_to_csv(mathematical_statistics.getInitialMomentsThirdOrder(), "3 Initial Moments Third Order")
         # self.plot_to_csv(mathematical_statistics.getInitialMomentsFourthOrder(), "4 Initial Moments Fourth Order")
         # self.plot_to_csv(mathematical_statistics.getVariance(), "5 Variance")
-        # self.plot_to_csv(mathematical_statistics.getVariance(), "No Variance")
-        # self.plot_to_csv(np.sqrt(mathematical_statistics.getVariance()), "No Sigma")
+        self.plot_to_csv(mathematical_statistics.getVariance(), "No Variance")
+        self.plot_to_csv(np.sqrt(mathematical_statistics.getVariance()), "No Sigma")
         # self.plot_to_csv(mathematical_statistics.getCentralMomentFunctionsFourthOrder(), "6 Central Moment Functions Fourth Order")
 
     def plotAllFourierStatistics(self):
@@ -117,20 +102,20 @@ class PlotStatistics():
         plt.setp(stemlines, 'linewidth', 3)
         plt.savefig(f'{path}/{name} bn.png', dpi=300)
 
-    def plot_to_png(self, plot, name, xlim = (0, 4.5), ylim = None, ytext="", xtext="", size=(19, 6)):
+    def plot_to_png(self, plot, name, xlim = None, ylim = None, ytext="", xtext="", size=(12, 6)):
         logger.info(f"Plot {name}.png")
         path = f'{self.plot_path}/Mathematical Statistics'
         Path(path).mkdir(parents=True, exist_ok=True)
         plt.clf()
-        plt.rcParams.update({'font.size': 16})
+        plt.rcParams.update({'font.size': 14})
         f, axis = plt.subplots(1)
+        f.tight_layout()
         f.set_size_inches(size[0], size[1])
-        # f.tight_layout()
         axis.grid(True)
         time = np.arange(0, len(plot), 1) / self.sampling_rate
         axis.plot(time, plot, linewidth=3)
         axis.set_xlabel(xtext, loc = 'right')
-        axis.set_title(ytext, loc = 'left', fontsize=18, position=(-0.04, 0))
+        axis.set_title(ytext, loc = 'left', fontsize=14, position=(-0.06, 0))
         if xlim is not None:
             axis.axis(xmin = xlim[0], xmax = xlim[1])
         if ylim is not None:

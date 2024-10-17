@@ -123,6 +123,7 @@ m-file/
 .vscode
 База даних ЕКГ/
 XLS_ECG_data/
+tmp/
 
 # Spyder project settings
 .spyderproject

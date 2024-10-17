@@ -1,0 +1,182 @@
+[DEFAULT]
+data_path = ECG_IEEE_Access_2022/dat
+xls_data_path = XLS_ECG_data
+fr_path = ECG_IEEE_Access_2022/fr
+img_path = img
+fr_img_path = img
+
+[H_P001_B001_1_S2]
+sig_name = 1
+file_name = /home/MyFiles2/ECG/cebsdb_2minutes/mat/Person_001/b001_1
+multiplier = 1
+pathology = 1
+data_type = mat
+
+[HC_P001_B001_1_S2]
+sig_name = 1
+file_name = /home/MyFiles2/ECG/cebsdb_2minutes/cyc/Person_001/b001_1_wksp
+multiplier = 1
+pathology = 1
+data_type = mat
+
+[HR_P001_B001_1_S2]
+sig_name = 1
+file_name = /home/MyFiles2/ECG/cebsdb_2minutes/red/Person_001/b001_1_wksp_RD
+multiplier = 1
+pathology = 1
+data_type = mat
+
+[AR_P100_100_1_S2]
+sig_name = 1
+file_name = /home/MyFiles2/ECG/MIT-BIH_Arrhythmia_Database/red/Person_100/100_1_wksp_RD
+multiplier = 1
+pathology = 2
+data_type = mat
+
+[9_8_II]
+sig_name = 2
+file_name = 8_M_П_9_Блок_прав_ніжки_BIDM PPG_Resp_1 хв_6сигн_44
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[9_8_V]
+sig_name = 6
+file_name = 8_M_П_9_Блок_прав_ніжки_BIDM PPG_Resp_1 хв_6сигн_44
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[9_4_II]
+sig_name = 2
+file_name = 4_М_П_9_Зм_сегм_ST_Ch TSB 2010_1 хв_7сигн_b78
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[9_3_II]
+sig_name = 2
+file_name = 3_М_П_9_Зм_сегм_ST_Ch TSB 2010_1 хв_7сигн_b04
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[9_2_II]
+sig_name = 2
+file_name = 2_M_П_9_Зм_сегм_ST_BIDM PPG_Resp_1 хв_5сигн_32
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[9_1_II]
+sig_name = 2
+file_name = 1_M_П_9_Зм_сегм_ST_BIDM PPG_Resp_1 хв_5сигн_13
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[9_7_II]
+sig_name = 2
+file_name = 7_М_П_9_Інфаркт_міок_Ch TSА 2009_1 хв_6сигн_103b
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[4_7_II]
+sig_name = 2
+file_name = 7_М_П_4_Морфологія_блокада_PTB_1 хв_12сигн_015
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[4_6_II]
+sig_name = 2
+file_name = 6_М_П_4_Морфологія_блокада_PTB_1 хв_12сигн_014
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[4_1_ECG_1]
+sig_name = 3
+file_name = 1_М_П_4_Морфологія_блокада_BID_1_хв_2сигн_01
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[4_1_ECG_2]
+sig_name = 4
+file_name = 1_М_П_4_Морфологія_блокада_BID_1_хв_2сигн_01
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[7_1_II]
+sig_name = 2
+file_name = 1_Н_7_Норма_1 хв_BIDM PPG_Resp_07
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[7_1_II_t]
+sig_name = 2
+file_name = 1_Н_7_Норма_1 хв_BIDM PPG_Resp_07
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[7_2_II]
+sig_name = 2
+file_name = 2_Н_7_Норма_1 хв_BIDM PPG_Resp_09
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[7_3_II]
+sig_name = 2
+file_name = 3_Н_7_Норма_1 хв_BIDM PPG_Resp_34
+multiplier = 1
+pathology = 1
+data_type = xlsx
+
+[PATIENT_1]
+sig_name = 1
+file_name = b001
+multiplier = 1
+pathology = 1
+data_type = physionet
+
+[PATIENT_2]
+sig_name = 1
+file_name = b001
+multiplier = 0.07
+pathology = 2
+data_type = physionet
+
+[B001_1]
+sig_name = 1
+file_name = b001
+multiplier = 0.1
+pathology = 1
+data_type = physionet
+
+[B002_1]
+sig_name = 1
+file_name = b002
+multiplier = 0.1
+pathology = 2
+data_type = physionet
+
+[P001_1]
+sig_name = 1
+file_name = p001
+multiplier = 0.2
+pathology = 5
+data_type = physionet
+
+[P002_1]
+sig_name = 1
+file_name = p002
+multiplier = 0.07
+pathology = 2
+data_type = physionet
+

@@ -4,7 +4,6 @@ from pathlib import Path
 from my_helpers.read_data.read_mat_file import ReadMatFile
 from my_helpers.read_data.read_physionet_file import ReadPhysionetFile
 from my_helpers.read_data.read_xls_file import ReadXLSFile
-import numpy as np
 
 class ReadDataFile:
 
@@ -38,33 +37,6 @@ class ReadDataFile:
         self.ECG_R_Peaks = ecg_fr["ECG_R_Peaks"]
 
         self.Q_S_exist = ("ECG_Q_Peaks" in ecg_fr and "ECG_S_Peaks" in ecg_fr)
-
-
-        # Line block
-        # T1_ECG_T_Peaks = []
-        # T1_ECG_P_Peaks = []
-        # T1_ECG_R_Peaks = []
-        # T1_Y = []
-        # for i in range(len(self.ECG_T_Peaks)-1):
-        #     T1_ECG_T_Peaks.append(round(self.ECG_T_Peaks[i+1] - self.ECG_T_Peaks[i], 2))
-
-        # for i in range(len(self.ECG_P_Peaks)-1):
-        #     T1_ECG_P_Peaks.append(round(self.ECG_P_Peaks[i+1] - self.ECG_P_Peaks[i], 2))
-
-        # for i in range(len(self.ECG_R_Peaks)-1):
-        #     T1_ECG_R_Peaks.append(round(self.ECG_R_Peaks[i+1] - self.ECG_R_Peaks[i], 2))
-
-        # for i in range(len(T1_ECG_P_Peaks)):
-        #     T1_Y.append(T1_ECG_P_Peaks[i])
-        #     T1_Y.append(T1_ECG_R_Peaks[i])
-        #     T1_Y.append(T1_ECG_T_Peaks[i])
-        
-        # m = np.mean(T1_Y)
-
-        # self.ECG_T_Peaks = np.arange(self.ECG_T_Peaks.iloc[0], self.ECG_T_Peaks.iloc[-1] - 1, m)
-        # self.ECG_R_Peaks = np.arange(self.ECG_R_Peaks.iloc[0], self.ECG_R_Peaks.iloc[-1] - 1, m)
-        # self.ECG_P_Peaks = np.arange(self.ECG_P_Peaks.iloc[0], self.ECG_P_Peaks.iloc[-1] - 1, m)
-
 
         matrix_P_R = []
         matrix_R_T = []
