@@ -1,7 +1,10 @@
 import json
+from pathlib import Path
+
+from werkzeug.exceptions import NotFound
 
 import numpy as np
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify, Response, abort
 from get_config.ecg_config import ECGConfig
 from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.plot_statistics import PlotStatistics
@@ -9,20 +12,60 @@ from my_helpers.data_preparation import DataPreparation
 from my_helpers.fourier_series import FourierSeries
 from my_helpers.mathematical_statistics import MathematicalStatistics
 from my_helpers.classifiers import Classifiers
+from my_helpers.read_data.read_data_file import ReadDataFile
 from my_helpers.test_classifiers import TestClassifiers
 from my_helpers.plot_classifier import PlotClassifier
 from my_helpers.test_diff_fr import TestDiffFr
+import glob
+
+
+def refresh_datafiles():
+    for db_id, db in databases.items():
+        files = [Path(f).stem for f in glob.glob(db['path'] + "/*.dat")]
+        file_map = dict()
+        for file in files:
+            file_map[file] = db['path'] + "/" + file
+
+        db['datafiles'] = file_map
+
 
 app = Flask(__name__)
-config_block = 'H_P001_PPG_S_S1'
+# config_block = 'H_P001_PPG_S_S1'
+
+databases = {
+    'pulse-transit-time-ppg.1.1.0': {
+        'id': 'pulse-transit-time-ppg.1.1.0',
+        'display_name': 'pulse-transit-time-ppg 1.1.0',
+        'path': '/Users/alantoo/Workspace/Edu/ecg_database/physionet.org/files/pulse-transit-time-ppg/1.1.0',
+        'datafiles': dict()
+    }
+}
+refresh_datafiles()
+
+
 # logger.debug("Read config file")
-ecg_config = ECGConfig(config_block)
-rhythm = GenerateRhythmFunction(ecg_config)
+# ecg_config = ECGConfig(config_block)
+
+
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         return super().default(obj)
+
+
+def new_cfg(database, datafile, sig):
+    db = databases[database]
+    if db is None:
+        raise NotFound()
+
+    fullpath = db['datafiles'][datafile]
+    return ECGConfig(None, state={
+        'sig_name': int(sig),
+        'file_name': fullpath,
+        'data_type': 'physionet',
+    })
+
 
 @app.route('/')
 def health():
@@ -31,35 +74,72 @@ def health():
 
 @app.get('/databases')
 def get_databases():
-    pass
+    return jsonify([{
+        'id': db_id,
+        'display_name': db['display_name'],
+    } for db_id, db in databases.items()])
 
-@app.get('/databases/<database>/signals')
-def get_database_signals():
-    pass
 
-@app.get('/databases/<database>/mat-stats')
-def get_mat_stats(database):
-#         data = DataPreparation(ecg_config)
-#         statistics = MathematicalStatistics(data.getPreparedData())
-#
-#         # path = f'{ecg_config.getImgPath()}/All Mean/CSV/Arrhythmia Mathematical Expectation.csv'
-#         # path = f'{ecg_config.getImgPath()}/All Mean/CSV/Healthy Mathematical Expectation.csv'
-#         # df = pd.read_csv(path)
-#         # no_mean = df["Data"]
-#         # statistics.setNoVariance(no_mean)
-#
-#         PlotStatistics(statistics, data.getModSamplingRate(), ecg_config, data.getPreparedData()).plotAllStatistics()
-    pass
+@app.get('/databases/<database>/data')
+def get_database_data_files(database):
+    db = databases[database]
+    if db is None:
+        raise NotFound()
 
-@app.get('/databases/<database>/intervals')
-def get_intervals(database):
-    data = rhythm.get_ecg_points(0)
+    return [fid for fid in db['datafiles']]
+
+
+@app.get('/databases/<database>/data/<datafile>/signals')
+def get_database_signals(database, datafile):
+    cfg = new_cfg(database, datafile, 0)
+    df = ReadDataFile(cfg)
+
+    def field_or_none(key, idx):
+        if len(df.fileds[key]) > idx:
+            return df.fileds[key][idx]
+
+    signals = [{
+        'id': sidx,
+        'name': df.fileds['sig_name'][sidx],
+        'comment': field_or_none('comments', sidx),
+        'units': field_or_none('units', sidx),
+    } for sidx, _ in enumerate(df.signals)]
+
+    return jsonify(signals)
+
+
+@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/math-stats')
+def get_mat_stats(database, datafile, signal):
+    cfg = new_cfg(database, datafile, signal)
+    rhythm = GenerateRhythmFunction(cfg)
+    df = rhythm.get_ecg_dataframe(signal)
+    data = DataPreparation(cfg, df)
+    statistics = MathematicalStatistics(data.getPreparedData())
+
+    # path = f'{ecg_config.getImgPath()}/All Mean/CSV/Arrhythmia Mathematical Expectation.csv'
+    # path = f'{ecg_config.getImgPath()}/All Mean/CSV/Healthy Mathematical Expectation.csv'
+    # df = pd.read_csv(path)
+    # no_mean = df["Data"]
+    # statistics.setNoVariance(no_mean)
+
+    stats = PlotStatistics(statistics, data.getModSamplingRate(), cfg,
+                           data.getPreparedData()).get_math_stats_points()
+    return jsonify(stats)
+
+
+@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/intervals')
+def get_intervals(database, datafile, signal):
+    cfg = new_cfg(database, datafile, signal)
+    rhythm = GenerateRhythmFunction(cfg)
+    data = rhythm.get_ecg_points(signal)
     return Response(json.dumps(data, cls=NumpyEncoder), mimetype='application/json')
 
 
-@app.get('/databases/<database>/rhythm')
-def get_rhythm(database):
-    data = rhythm.get_rhythm_points(0)
+@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/rhythm')
+def get_rhythm(database, datafile, signal):
+    cfg = new_cfg(database, datafile, signal)
+    rhythm = GenerateRhythmFunction(cfg)
+    data = rhythm.get_rhythm_points(signal)
     return jsonify(data)
 
 

@@ -42,9 +42,8 @@ class GenerateRhythmFunction(ReadDataFile):
                                "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
         nk.write_csv(ecg_fr, path_all)
 
-    def get_ecg_points(self, sigNameIdx):
-        logger.info("Plot ECG")
-        signal = self.signals[sigNameIdx]
+    def get_ecg_dataframe(self, sig_name_idx):
+        signal = self.signals[sig_name_idx]
         _, rpeaks = nk.ecg_peaks(signal, sampling_rate=self.sampling_rate)
         _, waves = nk.ecg_delineate(signal, rpeaks, sampling_rate=self.sampling_rate)
         ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate, 4))
@@ -53,223 +52,51 @@ class GenerateRhythmFunction(ReadDataFile):
         ECG_S_Peaks = list(np.round(np.array(waves["ECG_S_Peaks"]) / self.sampling_rate, 4))
         ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate, 4))
 
-        ecg_fr = pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
+        return pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
                                "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
 
+    def get_ecg_points(self, sig_name_idx):
+        logger.info("Plot ECG")
+
+        ecg_fr = self.get_ecg_dataframe(sig_name_idx)
         data = DataPreparation(self.ecg_config, ecg_fr)
-
-        # print(data.getPreparedData())
-
         ECG_data = np.transpose(data.getPreparedData())
 
         return [*ECG_data]
-        #
-        # mod_sampling_rate = int(self.sampling_rate * self.ecg_config.getMultiplier())
-        #
-        # matrix_T_P_size = 145
-        # matrix_P_R_size = 48
-        # matrix_R_T_size = 83
-        #
-        # interp_matrix_T_P = []
-        # interp_matrix_P_R = []
-        # interp_matrix_R_T = []
-        # interp_matrix_all = []
-        #
-        # matrix_P_R = []
-        # matrix_R_T = []
-        # matrix_T_P = []
-        #
-        # signal = self.signals[sigNameIdx]
-        # _, rpeaks = nk.ecg_peaks(signal, sampling_rate=self.sampling_rate)
-        # _, waves = nk.ecg_delineate(signal, rpeaks, sampling_rate=self.sampling_rate)
-        # ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate, 4))
-        # ECG_Q_Peaks = list(np.round(np.array(waves["ECG_Q_Peaks"]) / self.sampling_rate, 4))
-        # ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate, 4))
-        # ECG_S_Peaks = list(np.round(np.array(waves["ECG_S_Peaks"]) / self.sampling_rate, 4))
-        # ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate, 4))
-        #
-        # ecg_fr = pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
-        #                        "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
-        #
-        # ECG_T_Peaks = ecg_fr["ECG_T_Peaks"]
-        # ECG_P_Peaks = ecg_fr["ECG_P_Peaks"]
-        # ECG_R_Peaks = ecg_fr["ECG_R_Peaks"]
 
-        #
-        # T1_ECG_T_Peaks = []
-        # T1_ECG_P_Peaks = []
-        # T1_ECG_R_Peaks = []
-        # T1_Y = []
-        # # for i in range(len(ECG_T_Peaks)-1):
-        # #     T1_ECG_T_Peaks.append(round(ECG_T_Peaks[i+1] - ECG_T_Peaks[i], 2))
-        # #
-        # # for i in range(len(ECG_P_Peaks)-1):
-        # #     T1_ECG_P_Peaks.append(round(ECG_P_Peaks[i+1] - ECG_P_Peaks[i], 2))
-        # #
-        # # for i in range(len(ECG_R_Peaks)-1):
-        # #     T1_ECG_R_Peaks.append(round(ECG_R_Peaks[i+1] - ECG_R_Peaks[i], 2))
-        # #
-        # # for i in range(len(T1_ECG_P_Peaks)):
-        # #     T1_Y.append(T1_ECG_P_Peaks[i])
-        # #     T1_Y.append(T1_ECG_R_Peaks[i])
-        # #     T1_Y.append(T1_ECG_T_Peaks[i])
-        # #
-        # # m = np.mean(T1_Y)
-        # #
-        # # ECG_T_Peaks = np.arange(ECG_T_Peaks.iloc[0], ECG_T_Peaks.iloc[-1] - 1, m)
-        # # ECG_R_Peaks = np.arange(ECG_R_Peaks.iloc[0], ECG_R_Peaks.iloc[-1] - 1, m)
-        # # ECG_P_Peaks = np.arange(ECG_P_Peaks.iloc[0], ECG_P_Peaks.iloc[-1] - 1, m)
-        #
-        # for i in range(len(ECG_P_Peaks) - 1):
-        #     curr_signal = self.signals[self.ecg_config.getSigName()]
-        #
-        #     def appendIfNotNaN(segA, segB, lst):
-        #         start = segA[i] * self.sampling_rate
-        #         end = segB[i] * self.sampling_rate
-        #
-        #         if np.isnan(start) or np.isnan(end):
-        #             return
-        #
-        #         lst.append(curr_signal[int(start):int(end)])
-        #
-        #     appendIfNotNaN(ECG_P_Peaks, ECG_R_Peaks, matrix_P_R)
-        #     appendIfNotNaN(ECG_R_Peaks, ECG_T_Peaks, matrix_R_T)
-        #     appendIfNotNaN(ECG_T_Peaks, ECG_P_Peaks, matrix_T_P)
-        #     # start = int((ECG_P_Peaks[i]) * self.sampling_rate)
-        #     # end = int((ECG_R_Peaks[i]) * self.sampling_rate)
-        #     # matrix_P_R.append(curr_signal[start:end])
-        #     #
-        #     # start = int((ECG_R_Peaks[i]) * self.sampling_rate)
-        #     # end = int((ECG_T_Peaks[i]) * self.sampling_rate)
-        #     # matrix_R_T.append(curr_signal[start:end])
-        #     #
-        #     # start = int((ECG_T_Peaks[i]) * self.sampling_rate)
-        #     # end = int((ECG_P_Peaks[i + 1]) * self.sampling_rate)
-        #     # matrix_T_P.append(curr_signal[start:end])
-        #
-        # for i in range(len(matrix_T_P)):
-        #     arr = np.array(matrix_T_P[i])
-        #     arr_interp = interp.interp1d(np.arange(arr.size), arr)
-        #     arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_T_P_size))
-        #     interp_matrix_T_P.append(arr_stretch)
-        #
-        # for i in range(len(matrix_P_R)):
-        #     arr = np.array(matrix_P_R[i])
-        #     arr_interp = interp.interp1d(np.arange(arr.size), arr)
-        #     arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_P_R_size))
-        #     interp_matrix_P_R.append(arr_stretch)
-        #
-        # for i in range(len(matrix_R_T)):
-        #     arr = np.array(matrix_R_T[i])
-        #     arr_interp = interp.interp1d(np.arange(arr.size), arr)
-        #     arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_R_T_size))
-        #     interp_matrix_R_T.append(arr_stretch)
-        #
-        # interp_matrix_all = np.concatenate((interp_matrix_P_R, interp_matrix_R_T, interp_matrix_T_P), axis=1)
-        #
-        # # self.interp_matrix_all = interp_matrix_all
-        #
-        # for i in range(len(interp_matrix_all)):
-        #     arr = np.array(interp_matrix_all[i])
-        #     arr_interp = interp.interp1d(np.arange(arr.size), arr)
-        #     arr_stretch = arr_interp(np.linspace(0, arr.size - 1, mod_sampling_rate))
-        #     interp_matrix_all.append(arr_stretch)
-        #
-        #
-        # # print(data.getPreparedData())
-        #
-        # m_m = np.mean(interp_matrix_all, 1)
-        #
-        # ECG_data =  interp_matrix_all - m_m[:,None]
-        #
-        # return [*ECG_data]
-
-    def get_rhythm_points(self, sigNameIdx):
+    def get_rhythm_points(self, sig_name_idx):
         logger.info("Get rhythm points")
 
-        signal = self.signals[sigNameIdx]
-        _, rpeaks = nk.ecg_peaks(signal, sampling_rate=self.sampling_rate)
-        _, waves = nk.ecg_delineate(signal, rpeaks, sampling_rate=self.sampling_rate)
-        ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate, 4))
-        ECG_Q_Peaks = list(np.round(np.array(waves["ECG_Q_Peaks"]) / self.sampling_rate, 4))
-        ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate, 4))
-        ECG_S_Peaks = list(np.round(np.array(waves["ECG_S_Peaks"]) / self.sampling_rate, 4))
-        ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate, 4))
 
-        ecg_fr = pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
-                               "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
+        ecg_fr = self.get_ecg_dataframe(sig_name_idx)
 
-        T1_ECG_T_Peaks = []
-        T1_ECG_P_Peaks = []
-        T1_ECG_R_Peaks = []
-        T1_ECG_S_Peaks = []
-        T1_ECG_Q_Peaks = []
-        T1_X = []
-        T1_Y = []
 
         ecg_t_peaks = ecg_fr["ECG_T_Peaks"]
         ecg_p_peaks = ecg_fr["ECG_P_Peaks"]
         ecg_r_peaks = ecg_fr["ECG_R_Peaks"]
+        ecg_s_peaks = []
+        ecg_q_peaks = []
 
         q_s_exist = ("ECG_Q_Peaks" in ecg_fr and "ECG_S_Peaks" in ecg_fr)
-        #
-        # # Line block
-        # # T1_ECG_T_Peaks = []
-        # # T1_ECG_P_Peaks = []
-        # # T1_ECG_R_Peaks = []
-        # # T1_Y = []
-        # # for i in range(len(self.ECG_T_Peaks)-1):
-        # #     T1_ECG_T_Peaks.append(round(self.ECG_T_Peaks[i+1] - self.ECG_T_Peaks[i], 2))
-        #
-        # # for i in range(len(self.ECG_P_Peaks)-1):
-        # #     T1_ECG_P_Peaks.append(round(self.ECG_P_Peaks[i+1] - self.ECG_P_Peaks[i], 2))
-        #
-        # # for i in range(len(self.ECG_R_Peaks)-1):
-        # #     T1_ECG_R_Peaks.append(round(self.ECG_R_Peaks[i+1] - self.ECG_R_Peaks[i], 2))
-        #
-        # # for i in range(len(T1_ECG_P_Peaks)):
-        # #     T1_Y.append(T1_ECG_P_Peaks[i])
-        # #     T1_Y.append(T1_ECG_R_Peaks[i])
-        # #     T1_Y.append(T1_ECG_T_Peaks[i])
-        #
-        # # m = np.mean(T1_Y)
-        #
-        # # self.ECG_T_Peaks = np.arange(self.ECG_T_Peaks.iloc[0], self.ECG_T_Peaks.iloc[-1] - 1, m)
-        # # self.ECG_R_Peaks = np.arange(self.ECG_R_Peaks.iloc[0], self.ECG_R_Peaks.iloc[-1] - 1, m)
-        # # self.ECG_P_Peaks = np.arange(self.ECG_P_Peaks.iloc[0], self.ECG_P_Peaks.iloc[-1] - 1, m)
-        #
-        # matrix_P_R = []
-        # matrix_R_T = []
-        # matrix_T_P = []
-        #
-        # for i in range(len(self.ECG_P_Peaks) - 1):
-        #     start = int((self.ECG_P_Peaks[i]) * self.sampling_rate)
-        #     end = int((self.ECG_R_Peaks[i]) * self.sampling_rate)
-        #     matrix_P_R.append(self.signals[self.ecg_config.getSigName()][start:end])
-        #     start = int((self.ECG_R_Peaks[i]) * self.sampling_rate)
-        #     end = int((self.ECG_T_Peaks[i]) * self.sampling_rate)
-        #     matrix_R_T.append(self.signals[self.ecg_config.getSigName()][start:end])
-        #     start = int((self.ECG_T_Peaks[i]) * self.sampling_rate)
-        #     end = int((self.ECG_P_Peaks[i + 1]) * self.sampling_rate)
-        #     matrix_T_P.append(self.signals[self.ecg_config.getSigName()][start:end])
-        #
-        # self.matrix_T_P = matrix_T_P
-        # self.matrix_P_R = matrix_P_R
-        # self.matrix_R_T = matrix_R_T
 
         if q_s_exist:
             ecg_q_peaks = ecg_fr["ECG_Q_Peaks"]
             ecg_s_peaks = ecg_fr["ECG_S_Peaks"]
 
+        T1_ECG_T_Peaks = []
         for i in range(len(ecg_t_peaks) - 1):
             T1_ECG_T_Peaks.append(round(ecg_t_peaks[i + 1] - ecg_t_peaks[i], 2))
 
+        T1_ECG_P_Peaks = []
         for i in range(len(ecg_p_peaks) - 1):
             T1_ECG_P_Peaks.append(round(ecg_p_peaks[i + 1] - ecg_p_peaks[i], 2))
 
+        T1_ECG_R_Peaks = []
         for i in range(len(ecg_r_peaks) - 1):
             T1_ECG_R_Peaks.append(round(ecg_r_peaks[i + 1] - ecg_r_peaks[i], 2))
 
+        T1_ECG_S_Peaks = []
+        T1_ECG_Q_Peaks = []
         if q_s_exist:
             for i in range(len(ecg_s_peaks)-1):
                 T1_ECG_S_Peaks.append(round(ecg_s_peaks[i+1] - ecg_s_peaks[i], 2))
@@ -279,37 +106,13 @@ class GenerateRhythmFunction(ReadDataFile):
 
         points = list()
         for i in range(len(ecg_p_peaks) - 1):
-            # T1_X.append(ecg_p_peaks[i])
-
-            # points.append(Point(ecg_p_peaks[i], T1_ECG_P_Peaks[i]).__dict__)
-            # points.append(Point(ecg_r_peaks[i], T1_ECG_R_Peaks[i]).__dict__)
-            # points.append(Point(ecg_t_peaks[i], T1_ECG_T_Peaks[i]).__dict__)
             points.append([ecg_p_peaks[i], T1_ECG_P_Peaks[i]])
             points.append([ecg_r_peaks[i], T1_ECG_R_Peaks[i]])
             if q_s_exist:
-                points.append([ECG_Q_Peaks[i], T1_ECG_Q_Peaks[i]])
-                points.append([ECG_S_Peaks[i], T1_ECG_S_Peaks[i]])
+                points.append([ecg_q_peaks[i], T1_ECG_Q_Peaks[i]])
+                points.append([ecg_s_peaks[i], T1_ECG_S_Peaks[i]])
 
             points.append([ecg_t_peaks[i], T1_ECG_T_Peaks[i]])
-            # # if i == B_i :
-            # #     break
-            # # if self.Q_S_exist:
-            # #     T1_X.append(self.ECG_Q_Peaks[i])
-            # T1_X.append(ecg_r_peaks[i])
-            # # if self.Q_S_exist:
-            # #     T1_X.append(self.ECG_S_Peaks[i])
-            # T1_X.append(ecg_t_peaks[i])
-
-        # for i in range(len(T1_ECG_P_Peaks)):
-        #     T1_Y.append(T1_ECG_P_Peaks[i])
-        #     # if i == B_i :
-        #     #     break
-        #     # if self.Q_S_exist:
-        #     #     T1_Y.append(T1_ECG_Q_Peaks[i])
-        #     T1_Y.append(T1_ECG_R_Peaks[i])
-        #     # if self.Q_S_exist:
-        #     #     T1_Y.append(T1_ECG_S_Peaks[i])
-        #     T1_Y.append(T1_ECG_T_Peaks[i])
 
         return points
 
