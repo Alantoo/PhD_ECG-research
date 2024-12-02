@@ -3,7 +3,7 @@ from loguru import logger
 from my_helpers.read_data.read_data_file import ReadDataFile
 import numpy as np
 import time
-from scipy.integrate import simps
+# from scipy.integrate import simps
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import make_pipeline
@@ -121,10 +121,11 @@ class Test():
 
 
     def getFourierSeries(self, y, sampling_rate, terms = 30, L = 1,):
-        x = np.linspace(0, L, sampling_rate, endpoint=False)
-        # a0 = 2./L*simps(y,x)
-        an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
-        bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
-        list_a = np.abs([*[an(k) for k in range(1, terms + 1)]])
-        list_b = np.abs([*[bn(k) for k in range(1, terms + 1)]])
-        return list_a, list_b
+        # x = np.linspace(0, L, sampling_rate, endpoint=False)
+        # # a0 = 2./L*simps(y,x)
+        # an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
+        # bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
+        # list_a = np.abs([*[an(k) for k in range(1, terms + 1)]])
+        # list_b = np.abs([*[bn(k) for k in range(1, terms + 1)]])
+        # return list_a, list_b
+        pass

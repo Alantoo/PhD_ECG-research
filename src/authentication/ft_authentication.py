@@ -1,4 +1,4 @@
-from scipy.integrate import simps
+# from scipy.integrate import simps
 from authentication.confusion_matrix import ConfusionMatrix
 from get_config.ecg_config import ECGConfig
 from loguru import logger
@@ -386,14 +386,15 @@ class Authentication():
         # plt.savefig(f'{self.a_path}/Authentication.png', dpi=300)
 
     def getFourierSeries(self, y, fourier_type, terms = 40, L = 1):
-        x = np.linspace(0, L, self.sampling_rate, endpoint=False)
-        a0 = 2./L*simps(y,x)
-        an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
-        bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
-        list_a = np.abs([an(k) for k in range(1, terms + 1)])
-        list_b = np.abs([bn(k) for k in range(1, terms + 1)])
-        if fourier_type == "an":
-            return list_a
-        if fourier_type == "bn":
-            return list_b
-        return [*list_a, *list_b]
+        # x = np.linspace(0, L, self.sampling_rate, endpoint=False)
+        # a0 = 2./L*simps(y,x)
+        # an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
+        # bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
+        # list_a = np.abs([an(k) for k in range(1, terms + 1)])
+        # list_b = np.abs([bn(k) for k in range(1, terms + 1)])
+        # if fourier_type == "an":
+        #     return list_a
+        # if fourier_type == "bn":
+        #     return list_b
+        # return [*list_a, *list_b]
+        pass

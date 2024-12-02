@@ -40,10 +40,10 @@ class PlotStatistics():
         logger.info("Plot Mathematical Statistics")
         mathematical_statistics = self.statistics.getMathematicalStatistics()
         xtext = "$t, s$"
-        # self.plot_to_png([*mathematical_statistics.getMathematicalExpectation()] * 6, "1 Mathematical Expectation", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\omega}} (t), NU$")
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsSecondOrder()] * 6, "2 Initial Moments Second Order", xtext=xtext, ytext=r"${\widehat{m}}_{\xi_{\omega}}^2 (t), NU^2$")
-        # self.plot_to_png([*mathematical_statistics.getInitialMomentsThirdOrder()] * 6, "3 Initial Moments Third Order", xtext=xtext, ytext=r"${\widehat{m}}_{\xi_{\omega}}^3 (t), NU^3$")
-        # self.plot_to_png([*mathematical_statistics.getVariance()] * 6, "5 Variance", xtext=xtext, ytext=r"${\widehat{d}}_{\xi_{\omega}}^2 (t), NU^2$")
+        self.plot_to_png([*mathematical_statistics.getMathematicalExpectation()] * 6, "1 Mathematical Expectation", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\omega}} (t), NU$")
+        self.plot_to_png([*mathematical_statistics.getInitialMomentsSecondOrder()] * 6, "2 Initial Moments Second Order", xtext=xtext, ytext=r"${\widehat{m}}_{\xi_{\omega}}^2 (t), NU^2$")
+        self.plot_to_png([*mathematical_statistics.getInitialMomentsThirdOrder()] * 6, "3 Initial Moments Third Order", xtext=xtext, ytext=r"${\widehat{m}}_{\xi_{\omega}}^3 (t), NU^3$")
+        self.plot_to_png([*mathematical_statistics.getVariance()] * 6, "5 Variance", xtext=xtext, ytext=r"${\widehat{d}}_{\xi_{\omega}}^2 (t), NU^2$")
 
         # self.plot_to_png([*mathematical_statistics.getMathematicalExpectation()] * 6, "1 Mathematical Expectation", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\hat{T}_{av}}} (t), NU$")
         # self.plot_to_png([*mathematical_statistics.getInitialMomentsSecondOrder()] * 6, "2 Initial Moments Second Order", xtext=xtext, ytext=r"$\widehat{m}_{\xi_{\hat{T}_{av}}}^2 (t), NU^2$")
@@ -59,14 +59,14 @@ class PlotStatistics():
         # self.plot_to_png(mathematical_statistics.getCentralMomentFunctionsFourthOrder(), "6 Central Moment Functions Fourth Order",  xtext=xtext, ytext=r"$d_{{\xi}} (t), mV^4$")є
         # self.plot_to_png(np.sqrt(mathematical_statistics.getVariance()), "No Sigma", xtext=xtext, ytext=r"$\hat{\sigma}_{{\xi}} (N), mV$")
  
-        # self.plot_to_csv(mathematical_statistics.getMathematicalExpectation(), "1 Mathematical Expectation")
-        # self.plot_to_csv(mathematical_statistics.getInitialMomentsSecondOrder(), "2 Initial Moments Second Order")
-        # self.plot_to_csv(mathematical_statistics.getInitialMomentsThirdOrder(), "3 Initial Moments Third Order")
-        # self.plot_to_csv(mathematical_statistics.getInitialMomentsFourthOrder(), "4 Initial Moments Fourth Order")
-        # self.plot_to_csv(mathematical_statistics.getVariance(), "5 Variance")
+        self.plot_to_csv(mathematical_statistics.getMathematicalExpectation(), "1 Mathematical Expectation")
+        self.plot_to_csv(mathematical_statistics.getInitialMomentsSecondOrder(), "2 Initial Moments Second Order")
+        self.plot_to_csv(mathematical_statistics.getInitialMomentsThirdOrder(), "3 Initial Moments Third Order")
+        self.plot_to_csv(mathematical_statistics.getInitialMomentsFourthOrder(), "4 Initial Moments Fourth Order")
+        self.plot_to_csv(mathematical_statistics.getVariance(), "5 Variance")
         # self.plot_to_csv(mathematical_statistics.getVariance(), "No Variance")
         # self.plot_to_csv(np.sqrt(mathematical_statistics.getVariance()), "No Sigma")
-        # self.plot_to_csv(mathematical_statistics.getCentralMomentFunctionsFourthOrder(), "6 Central Moment Functions Fourth Order")
+        self.plot_to_csv(mathematical_statistics.getCentralMomentFunctionsFourthOrder(), "6 Central Moment Functions Fourth Order")
 
     def plotAllFourierStatistics(self):
         logger.info("Plot Mathematical Statistics Fourier")

@@ -1,6 +1,6 @@
 import numpy as np
 import time
-from scipy.integrate import simps
+# from scipy.integrate import simps
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import make_pipeline
@@ -120,8 +120,9 @@ class Classifiers():
 
 
     def getFourierSeriesA(self, y, terms = 30, L = 1):
-        x = np.linspace(0, L, self.sampling_rate, endpoint=False)
-        a0 = 2./L*simps(y,x)
-        an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
-        list_a = np.abs([*[an(k) for k in range(1, terms + 1)]])
-        return list_a
+        # x = np.linspace(0, L, self.sampling_rate, endpoint=False)
+        # a0 = 2./L*simps(y,x)
+        # an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
+        # list_a = np.abs([*[an(k) for k in range(1, terms + 1)]])
+        # return list_a
+        pass

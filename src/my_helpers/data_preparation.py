@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 
 class DataPreparation(ReadDataFile):
 
-    def __init__(self, ecg_config):
+    def __init__(self, ecg_config, ecg_fr = None):
         super().__init__(ecg_config)
-        self.getData()
+        self.getData(ecg_fr)
 
         self.mod_sampling_rate = int(self.sampling_rate * self.ecg_config.getMultiplier())
 

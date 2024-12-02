@@ -2,7 +2,7 @@ from loguru import logger
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
-from scipy.integrate import simps
+# from scipy.integrate import simps
 
 class FourierSeries():
 
@@ -78,8 +78,9 @@ class FourierSeries():
 
 
     def getFourierSeries(self, y, L = 1):
-        x = np.linspace(0, L, self.sampling_rate, endpoint=False)
-        a0 = 2./L*simps(y,x)
-        an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
-        bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
-        return a0, an, bn, x, y
+        # x = np.linspace(0, L, self.sampling_rate, endpoint=False)
+        # a0 = 2./L*simps(y,x)
+        # an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
+        # bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
+        # return a0, an, bn, x, y
+        pass

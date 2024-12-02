@@ -5,7 +5,7 @@ from get_config.ecg_config_validate import ECGConfigConfig, ECGConfigException
 
 class ECGConfig:
 
-    CONFIG_FILE_PATH = "src/config/ecg.config"
+    CONFIG_FILE_PATH = "config/ecg.config"
 
     def __init__(self, config_block, config_file_path=None):
         if config_file_path is not None:

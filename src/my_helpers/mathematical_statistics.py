@@ -1,6 +1,6 @@
 from my_helpers.mathematical_statistics_data import MathematicalStatisticsData
 import numpy as np
-from scipy.integrate import simps
+# from scipy.integrate import simps
 
 class MathematicalStatistics(MathematicalStatisticsData):
     def __init__(self, data):
@@ -77,13 +77,14 @@ class MathematicalStatistics(MathematicalStatisticsData):
         return MathematicalStatisticsData(m_f * 1000, m_2_f * 1000, m_3_f * 1000, m_4_f * 1000, m__2_f * 1000, m__4_f * 1000)
 
     def getFourierSeries(self, y, terms = 30, L = 1):
-        x = np.linspace(0, L, self.sampling_rate, endpoint=False)
-        a0 = 2./L*simps(y,x)
-        an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
-        bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
-        list_a = np.abs([a0, *[an(k) for k in range(1, terms + 1)]])
-        list_b = np.abs([bn(k) for k in range(1, terms + 1)])
-        return list_a, list_b
+        # x = np.linspace(0, L, self.sampling_rate, endpoint=False)
+        # a0 = 2./L*simps(y,x)
+        # an = lambda n:2.0/L*simps(y*np.cos(2.*np.pi*n*x/L),x)
+        # bn = lambda n:2.0/L*simps(y*np.sin(2.*np.pi*n*x/L),x)
+        # list_a = np.abs([a0, *[an(k) for k in range(1, terms + 1)]])
+        # list_b = np.abs([bn(k) for k in range(1, terms + 1)])
+        # return list_a, list_b
+        pass
     
     def setSamplingRate(self, sampling_rate):
         self.sampling_rate = sampling_rate
