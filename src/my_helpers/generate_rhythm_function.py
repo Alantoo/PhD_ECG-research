@@ -53,7 +53,14 @@ class GenerateRhythmFunction(ReadDataFile):
         ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate, 4))
 
         return pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
-                               "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
+                             "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
+
+    def to_data_points(self, raw_list):
+        time = np.arange(0, len(raw_list), 1) / self.sampling_rate
+        points = list()
+        for i in range(len(raw_list)):
+            points.append([time[i], raw_list[i]])
+        return points
 
     def get_ecg_points(self, sig_name_idx):
         logger.info("Plot ECG")
@@ -62,14 +69,16 @@ class GenerateRhythmFunction(ReadDataFile):
         data = DataPreparation(self.ecg_config, ecg_fr)
         ECG_data = np.transpose(data.getPreparedData())
 
-        return [*ECG_data]
+        result = [*ECG_data]
+        for i in range(len(result)):
+            result[i] = self.to_data_points(result[i])
+
+        return result
 
     def get_rhythm_points(self, sig_name_idx):
         logger.info("Get rhythm points")
 
-
         ecg_fr = self.get_ecg_dataframe(sig_name_idx)
-
 
         ecg_t_peaks = ecg_fr["ECG_T_Peaks"]
         ecg_p_peaks = ecg_fr["ECG_P_Peaks"]
@@ -98,11 +107,11 @@ class GenerateRhythmFunction(ReadDataFile):
         T1_ECG_S_Peaks = []
         T1_ECG_Q_Peaks = []
         if q_s_exist:
-            for i in range(len(ecg_s_peaks)-1):
-                T1_ECG_S_Peaks.append(round(ecg_s_peaks[i+1] - ecg_s_peaks[i], 2))
+            for i in range(len(ecg_s_peaks) - 1):
+                T1_ECG_S_Peaks.append(round(ecg_s_peaks[i + 1] - ecg_s_peaks[i], 2))
 
-            for i in range(len(ecg_q_peaks)-1):
-                T1_ECG_Q_Peaks.append(round(ecg_q_peaks[i+1] - ecg_q_peaks[i], 2))
+            for i in range(len(ecg_q_peaks) - 1):
+                T1_ECG_Q_Peaks.append(round(ecg_q_peaks[i + 1] - ecg_q_peaks[i], 2))
 
         points = list()
         for i in range(len(ecg_p_peaks) - 1):

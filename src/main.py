@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from werkzeug.exceptions import NotFound
@@ -17,6 +16,8 @@ from my_helpers.test_classifiers import TestClassifiers
 from my_helpers.plot_classifier import PlotClassifier
 from my_helpers.test_diff_fr import TestDiffFr
 import glob
+from flask_cors import CORS, cross_origin
+import simplejson as json
 
 
 def refresh_datafiles():
@@ -30,6 +31,7 @@ def refresh_datafiles():
 
 
 app = Flask(__name__)
+cors = CORS(app)
 # config_block = 'H_P001_PPG_S_S1'
 
 databases = {
@@ -73,6 +75,7 @@ def health():
 
 
 @app.get('/databases')
+@cross_origin()
 def get_databases():
     return jsonify([{
         'id': db_id,
@@ -107,9 +110,17 @@ def get_database_signals(database, datafile):
 
     return jsonify(signals)
 
-
+math_cache = dict()
+def cache_key(database, datafile, signal):
+    return database + "/" + datafile + "/" + str(signal)
 @app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/math-stats')
 def get_mat_stats(database, datafile, signal):
+    key = cache_key(database, datafile, signal)
+    found = math_cache.get(key)
+    if found is not None:
+        json_data = json.dumps(found, ignore_nan=True)
+        return Response(json_data, mimetype='application/json')
+
     cfg = new_cfg(database, datafile, signal)
     rhythm = GenerateRhythmFunction(cfg)
     df = rhythm.get_ecg_dataframe(signal)
@@ -124,23 +135,43 @@ def get_mat_stats(database, datafile, signal):
 
     stats = PlotStatistics(statistics, data.getModSamplingRate(), cfg,
                            data.getPreparedData()).get_math_stats_points()
-    return jsonify(stats)
+
+    math_cache[key] = stats
+    json_data = json.dumps(stats, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
 
 
+intervals_cache = dict()
 @app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/intervals')
 def get_intervals(database, datafile, signal):
+    key = cache_key(database, datafile, signal)
+    found = intervals_cache.get(key)
+    if found is not None:
+        return Response(json.dumps(found, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
+
     cfg = new_cfg(database, datafile, signal)
     rhythm = GenerateRhythmFunction(cfg)
     data = rhythm.get_ecg_points(signal)
-    return Response(json.dumps(data, cls=NumpyEncoder), mimetype='application/json')
+
+    intervals_cache[key] = data
+    return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
 
+rhythm_cache = dict()
 @app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/rhythm')
 def get_rhythm(database, datafile, signal):
+    key = cache_key(database, datafile, signal)
+    found = rhythm_cache.get(key)
+    if found is not None:
+        json_data = json.dumps(found, ignore_nan=True)
+        return Response(json_data, mimetype='application/json')
+
     cfg = new_cfg(database, datafile, signal)
     rhythm = GenerateRhythmFunction(cfg)
     data = rhythm.get_rhythm_points(signal)
-    return jsonify(data)
+    rhythm_cache[key] = data
+    json_data = json.dumps(data, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
 
 
 if __name__ == '__main__':

@@ -38,15 +38,23 @@ class PlotStatistics():
                               ztext=r'$\hat{R}_{2_{\xi}} (t_1, t_2), NU^2$')
         # self._3d_plot_to_file(c3, "L-Autocovariation function d-3 m-t", "Autocovariation", size=(10, 10, 10), ztext=r'${\widehat{R}}_{\xi_{\hat{T}_{av}}}^2 (t_1, t_2), NU^2$')
 
+    def to_data_points(self, raw_list):
+        time = np.arange(0, len(raw_list), 1) / self.sampling_rate
+        points = list()
+        for i in range(len(raw_list)):
+            points.append([time[i], raw_list[i]])
+        return points
+
     def get_math_stats_points(self):
         mathematical_statistics = self.statistics.getMathematicalStatistics()
         return {
-            "mathematical_expectation": mathematical_statistics.getMathematicalExpectation(),
-            "initial_moments_second_order": mathematical_statistics.getInitialMomentsSecondOrder(),
-            "initial_moments_third_order": mathematical_statistics.getInitialMomentsThirdOrder(),
-            "initial_moments_fourth_order": mathematical_statistics.getInitialMomentsFourthOrder(),
-            "central_moment_functions_fourth_order": mathematical_statistics.getCentralMomentFunctionsFourthOrder(),
-            "variance": mathematical_statistics.getVariance(),
+            "mathematical_expectation": self.to_data_points(mathematical_statistics.getMathematicalExpectation()),
+            "initial_moments_second_order": self.to_data_points(mathematical_statistics.getInitialMomentsSecondOrder()),
+            "initial_moments_third_order": self.to_data_points(mathematical_statistics.getInitialMomentsThirdOrder()),
+            "initial_moments_fourth_order": self.to_data_points(mathematical_statistics.getInitialMomentsFourthOrder()),
+            "central_moment_functions_fourth_order": self.to_data_points(
+                mathematical_statistics.getCentralMomentFunctionsFourthOrder()),
+            "variance": self.to_data_points(mathematical_statistics.getVariance()),
         }
 
     def plotAllStatistics(self):
