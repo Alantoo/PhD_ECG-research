@@ -1,5 +1,6 @@
 from my_helpers.mathematical_statistics_data import MathematicalStatisticsData
 import numpy as np
+from scipy.signal import find_peaks, butter, filtfilt
 # from scipy.integrate import simps
 
 class MathematicalStatistics(MathematicalStatisticsData):
@@ -8,8 +9,21 @@ class MathematicalStatistics(MathematicalStatisticsData):
         self.data = data
         #Mathematical expectation
         self.m_ = [np.mean(i) for i in data]
+        self.variance__ = [np.var(i) for i in data]
+        self.rhythm = np.diff(data)
         #Initial moments of the second order
         self.m_2_ = [np.sum(np.array(i)**2) / len(i) for i in data]
+
+        # fs = data.data.shape[0]
+        # peaks, _ = find_peaks(data, height=0.5, distance=fs * 0.6)  # Мінімальна відстань ~600 мс
+        #
+        # # Обчислення RR-інтервалів
+        # rr_intervals = np.diff(peaks) / fs  # Інтервали між піками (у секундах)
+        #
+        # # Обчислення миттєвої частоти серцевих скорочень (ЧСС)
+        # heart_rate = 60 / rr_intervals  # Перетворення в удари за хвилину (BPM)
+
+
         #Initial moments of the third order
         self.m_3_ = [np.sum(np.array(i)**3) / len(i) for i in data]
         #Initial moments of the fourth order

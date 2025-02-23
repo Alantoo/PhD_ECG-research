@@ -1,23 +1,20 @@
+import glob
 from pathlib import Path
 
+import numpy as np
+import simplejson as json
+from flask import Flask, jsonify, Response, request
+from flask_cors import CORS, cross_origin
 from werkzeug.exceptions import NotFound
 
-import numpy as np
-from flask import Flask, jsonify, Response, abort
+from gen_sig import to_np_array
 from get_config.ecg_config import ECGConfig
-from my_helpers.generate_rhythm_function import GenerateRhythmFunction
-from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.data_preparation import DataPreparation
-from my_helpers.fourier_series import FourierSeries
+from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.mathematical_statistics import MathematicalStatistics
-from my_helpers.classifiers import Classifiers
+from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.read_data.read_data_file import ReadDataFile
-from my_helpers.test_classifiers import TestClassifiers
-from my_helpers.plot_classifier import PlotClassifier
-from my_helpers.test_diff_fr import TestDiffFr
-import glob
-from flask_cors import CORS, cross_origin
-import simplejson as json
+from simulation import Simulation
 
 
 def refresh_datafiles():
@@ -110,9 +107,14 @@ def get_database_signals(database, datafile):
 
     return jsonify(signals)
 
+
 math_cache = dict()
+
+
 def cache_key(database, datafile, signal):
     return database + "/" + datafile + "/" + str(signal)
+
+
 @app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/math-stats')
 def get_mat_stats(database, datafile, signal):
     key = cache_key(database, datafile, signal)
@@ -142,6 +144,8 @@ def get_mat_stats(database, datafile, signal):
 
 
 intervals_cache = dict()
+
+
 @app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/intervals')
 def get_intervals(database, datafile, signal):
     key = cache_key(database, datafile, signal)
@@ -158,6 +162,8 @@ def get_intervals(database, datafile, signal):
 
 
 rhythm_cache = dict()
+
+
 @app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/rhythm')
 def get_rhythm(database, datafile, signal):
     key = cache_key(database, datafile, signal)
@@ -174,7 +180,75 @@ def get_rhythm(database, datafile, signal):
     return Response(json_data, mimetype='application/json')
 
 
+def to_np_array_on_demand(array):
+    if len(array) == 2:
+        return array
+
+    return to_np_array(array)
+
+@app.post('/modelling/ecg')
+def simulate_ecg():
+    body = request.get_json()
+    variance_data = to_np_array_on_demand(body['variance'])
+    mean_data = to_np_array_on_demand(body['mean'])
+    rhythm_data = to_np_array_on_demand(body['rhythm'])
+    cycles_count = body['count']
+
+    sim = Simulation()
+    cycle_data = sim.gen_cycle(rhythm_data, variance_data, mean_data, cycles_count)
+    json_data = json.dumps(cycle_data, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+
+def bandpass(data, fs):
+    m = np.mean(data)
+    data = (data - m)
+    t = 1
+    if np.max(data) > 1000:
+        t = 1000.0
+    res = data / t
+    # return data
+    return res
+
+
 if __name__ == '__main__':
+    # cfg = new_cfg("pulse-transit-time-ppg.1.1.0", "s1_sit", 0)
+    # rhythm = GenerateRhythmFunction(cfg)
+    # # ecg_points = rhythm.get_ecg_points(0)
+    # dispersion_points = rhythm.get_dispersion_points(0)
+    #
+    # signals, fileds = wfdb.rdsamp(cfg.getFileName())
+    #
+    # sampling_rate = fileds['fs']
+    # signals = signals.transpose()
+    #
+    # bandpass_notch_channels = []
+    # for i in signals:
+    #     bandpass_notch_channels.append(bandpass(i, fs=sampling_rate))
+    #
+    # signals = bandpass_notch_channels
+    # target = signals[0]
+    #
+    # cleaned = nk.ecg_clean(target, sampling_rate)
+    # processed, data = nk.ecg_process(cleaned, sampling_rate)
+    # peaksSignals, peaksInfo = nk.ecg_peaks(cleaned, sampling_rate)
+    # nk.ecg_plot(processed, data)
+    # fig = plt.gcf()
+    # fig.set_size_inches(10, 12, forward=True)
+    # fig.savefig("ecg.png")
+    #
+    # disp = np.var(processed, axis=0)
+    #
+    #
+    # # qrs_epochs = nk.ecg_segment(cleaned, rpeaks=None, sampling_rate=sampling_rate, show=True)
+    # # first_epoch = qrs_epochs["1"]
+    # # points = list()
+    # # for ix in range(first_epoch.size):
+    # #     points.append(first_epoch.at(ix))
+    # fig = plt.gcf()
+    # fig.set_size_inches(10, 12, forward=True)
+    # fig.savefig("segment.png")
+
     app.run()
 
 # from authentication.authentication import Authentication

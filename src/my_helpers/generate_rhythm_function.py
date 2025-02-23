@@ -63,7 +63,7 @@ class GenerateRhythmFunction(ReadDataFile):
         return points
 
     def get_ecg_points(self, sig_name_idx):
-        logger.info("Plot ECG")
+        logger.info("Get ECG Points")
 
         ecg_fr = self.get_ecg_dataframe(sig_name_idx)
         data = DataPreparation(self.ecg_config, ecg_fr)
@@ -74,6 +74,18 @@ class GenerateRhythmFunction(ReadDataFile):
             result[i] = self.to_data_points(result[i])
 
         return result
+
+    def get_dispersion_points(self, sig_name_idx):
+        logger.info("Dispersion ECG")
+
+        ecg_fr = self.get_ecg_dataframe(sig_name_idx)
+        data = DataPreparation(self.ecg_config, ecg_fr)
+        prepared_data = data.getPreparedData()
+        transposed_data = np.transpose(prepared_data)
+        var_data = np.var(transposed_data, axis=1, ddof=0)
+
+        result = [*var_data]
+        return self.to_data_points(result)
 
     def get_rhythm_points(self, sig_name_idx):
         logger.info("Get rhythm points")
