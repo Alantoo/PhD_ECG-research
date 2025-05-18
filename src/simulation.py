@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import resample
 
+
 def show_plot(title, t_data, sig_data):
     # Візуалізація
     plt.plot(t_data, sig_data, label="Змодельований сигнал")
@@ -28,6 +29,7 @@ def getNewMatrixSize(matrix, multiplier):
     n = int(len(matrix[0]) * multiplier)
     return n
 
+
 def interpolate_matrix(matrix, size=None):
     if size is None:
         size = getNewMatrixSize(matrix, 1)
@@ -40,10 +42,10 @@ def interpolate_matrix(matrix, size=None):
 
     return out
 
+
 class Simulation:
     def __init__(self):
         pass
-
 
     def gen_cycle(self, rhythm_data, variance_data, mean_data, count):
         last_time = 0
@@ -175,6 +177,9 @@ class Simulation:
                 time_rhythm.append(rhythm_v / mean_rhythm)
 
         cycles_count = len(rhythm_matrix[0])
+        if cycles_count > 20:
+            cycles_count = 20
+
         segments_count = len(interpolated_matrix)
         points = list()
         last_time = 0
@@ -197,8 +202,8 @@ class Simulation:
                 new_duration = int(segment_duration * rhythm_ratio)
                 t = np.linspace(0, new_duration, new_duration)  # Спільний часовий інтервал
 
-                mean_interp = interp1d(mean_time, mean_data, kind='cubic', fill_value="extrapolate")
-                variance_interp = interp1d(variance_time, variance_data, kind='cubic', fill_value="extrapolate")
+                mean_interp = interp1d(mean_time, mean_data, kind='nearest', fill_value="extrapolate")
+                variance_interp = interp1d(variance_time, variance_data, kind='nearest', fill_value="extrapolate")
 
                 # Отримуємо значення на всьому часовому інтервалі
                 # mean = resample(mean_data, new_duration)
@@ -211,7 +216,7 @@ class Simulation:
                 if bool(random.getrandbits(1)):
                     direction = -1
 
-                ecg_signal = mean + direction * np.sqrt(variance)
+                ecg_signal = mean + direction * np.sqrt(np.abs(variance))
                 # rhythm = 1
                 # ecg_signal = mean + np.sin(2 * np.pi * rhythm * t) + np.random.normal(0, np.sqrt(variance), len(t))
 
@@ -233,4 +238,22 @@ class Simulation:
 
                 last_time = last_tval
 
-        return points
+        def stats_matrix_to_points(matrix):
+            data = []
+            for row in matrix:
+                data.extend(row)
+            data_time = np.linspace(0, len(data), len(data))
+            output_points = []
+            for i in range(len(data)):
+                output_points.append([data_time[i], data[i]])
+
+            return output_points
+
+        meta = {
+            "mean": stats_matrix_to_points(mean_matrix),
+            "variance": stats_matrix_to_points(variance_matrix),
+            "rhythm": stats_matrix_to_points(rhythm_matrix),
+            "mean_rhythm": mean_time_rhythm
+        }
+
+        return points, meta

@@ -77,7 +77,55 @@ def get_databases():
     return jsonify([{
         'id': db_id,
         'display_name': db['display_name'],
+        'files': db['datafiles'],
     } for db_id, db in databases.items()])
+
+v2dbs_cache = dict()
+@app.get('/v2/databases')
+@cross_origin()
+def v2_get_databases():
+    key = cache_key('v2_get_databases', 'datafile', 'signal')
+    found = v2dbs_cache.get(key)
+    if found is not None:
+        json_data = json.dumps(found, ignore_nan=True)
+        return Response(json_data, mimetype='application/json')
+    output = []
+    for db_id, db in databases.items():
+        fileinfoes = []
+        for k in db['datafiles']:
+            cfg = new_cfg(db_id, k, 0)
+            df = ReadDataFile(cfg)
+            def field_or_none(key, idx):
+                if len(df.fileds[key]) > idx:
+                    return df.fileds[key][idx]
+
+            signals = []
+            for sidx, _ in enumerate(df.signals):
+                item = {
+                    'id': sidx,
+                    'name': df.fileds['sig_name'][sidx],
+                    'comment': field_or_none('comments', sidx),
+                    'units': field_or_none('units', sidx),
+                }
+
+                # NOTICE: currently ECG signals supported only
+                if item['name'] != 'ecg':
+                    continue
+
+                signals.append(item)
+            fileinfoes.append({
+                'file_id': k,
+                'signals': signals,
+            })
+        dbinfo = {
+            'id': db_id,
+            'display_name': db['display_name'],
+            'files': fileinfoes,
+        }
+        output.append(dbinfo)
+
+    v2dbs_cache[key] = output
+    return jsonify(output)
 
 
 @app.get('/databases/<database>/data')
@@ -187,6 +235,27 @@ def get_signal_raw_data(database, datafile, signal):
 
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
+
+@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/modelled')
+def get_signal_modelled(database, datafile, signal):
+    # key = cache_key(database, datafile, signal)
+    # found = intervals_cache.get(key)
+    # if found is not None:
+    #     return Response(json.dumps(found, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
+
+    cfg = new_cfg(database, datafile, signal)
+    rhythm = GenerateRhythmFunction(cfg)
+    data = rhythm.get_signal_raw_data(signal)
+    s = Simulation()
+    generated, meta = s.gen_ecg_from_prototype(data, 500)
+
+    # intervals_cache[key] = data
+    result = {
+        "signal": generated,
+        "meta": meta,
+    }
+    json_data = json.dumps(result, ignore_nan=True, cls=NumpyEncoder)
+    return Response(json_data, mimetype='application/json')
 
 
 rhythm_cache = dict()
