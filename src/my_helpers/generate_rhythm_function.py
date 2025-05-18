@@ -20,6 +20,12 @@ class GenerateRhythmFunction(ReadDataFile):
     def __init__(self, ecg_config):
         super().__init__(ecg_config)
 
+    def get_signal_data(self, index):
+        return self.to_data_points(self.get_signal_raw_data(index))
+
+    def get_signal_raw_data(self, index):
+        return self.signals[index]
+
     def genFr(self):
         logger.info("Get ECG Peaks")
         path = f'{self.ecg_config.getImgPath()}/{self.ecg_config.getConfigBlock()}'
