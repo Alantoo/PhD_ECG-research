@@ -177,8 +177,8 @@ class Simulation:
                 time_rhythm.append(rhythm_v / mean_rhythm)
 
         cycles_count = len(rhythm_matrix[0])
-        if cycles_count > 20:
-            cycles_count = 20
+        if cycles_count > 10:
+            cycles_count = 10
 
         segments_count = len(interpolated_matrix)
         points = list()
@@ -200,23 +200,23 @@ class Simulation:
                 # Інтерполяція для приведення до спільного часу
                 segment_duration = len(raw_data)
                 new_duration = int(segment_duration * rhythm_ratio)
-                t = np.linspace(0, new_duration, new_duration)  # Спільний часовий інтервал
+                t = np.linspace(0, new_duration, segment_duration)  # Спільний часовий інтервал
 
-                mean_interp = interp1d(mean_time, mean_data, kind='nearest', fill_value="extrapolate")
-                variance_interp = interp1d(variance_time, variance_data, kind='nearest', fill_value="extrapolate")
+                # mean_interp = interp1d(mean_time, mean_data, kind='nearest', fill_value="extrapolate")
+                # variance_interp = interp1d(variance_time, variance_data, kind='nearest', fill_value="extrapolate")
 
                 # Отримуємо значення на всьому часовому інтервалі
                 # mean = resample(mean_data, new_duration)
                 # variance = resample(variance_data, new_duration)
-                mean = mean_interp(t)
-                variance = variance_interp(t)
+                # mean = mean_interp(t)
+                # variance = variance_interp(t)
 
                 # Генерація циклічного сигналу
                 direction = 1
                 if bool(random.getrandbits(1)):
                     direction = -1
 
-                ecg_signal = mean + direction * np.sqrt(np.abs(variance))
+                ecg_signal = mean_data + direction * np.sqrt(np.abs(variance_data))
                 # rhythm = 1
                 # ecg_signal = mean + np.sin(2 * np.pi * rhythm * t) + np.random.normal(0, np.sqrt(variance), len(t))
 

@@ -1,4 +1,5 @@
 import glob
+import os
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,8 @@ from my_helpers.mathematical_statistics import MathematicalStatistics
 from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.read_data.read_data_file import ReadDataFile
 from simulation import Simulation
+import dotenv
+dotenv.load_dotenv()
 
 
 def refresh_datafiles():
@@ -27,18 +30,36 @@ def refresh_datafiles():
         db['datafiles'] = file_map
 
 
+def read_physionet_database_directory(base):
+    if base.endswith('/files') is False:
+        base += '/files'
+
+    db = dict()
+    for f in os.scandir(base):
+        if f.is_dir() is False:
+            continue
+
+        for child_f in os.scandir(f.path):
+            if child_f.is_dir() is False:
+                continue
+            dbid = f'{f.name}-{child_f.name}'
+            db[dbid] = {
+                'id': dbid,
+                'display_name': f'{f.name} {child_f.name}',
+                'path': child_f.path,
+                'datafiles': dict(),
+            }
+    return db
+
 app = Flask(__name__)
 cors = CORS(app)
 # config_block = 'H_P001_PPG_S_S1'
 
-databases = {
-    'pulse-transit-time-ppg.1.1.0': {
-        'id': 'pulse-transit-time-ppg.1.1.0',
-        'display_name': 'pulse-transit-time-ppg 1.1.0',
-        'path': '/Users/alantoo/Workspace/Edu/ecg_database/physionet.org/files/pulse-transit-time-ppg/1.1.0',
-        'datafiles': dict()
-    }
-}
+BASE_PHYSIONET_LOCATION = os.environ.get('APP_BASE_PHYSIONET_LOCATION')
+if BASE_PHYSIONET_LOCATION is None:
+    raise Exception('APP_BASE_PHYSIONET_LOCATION is required')
+
+databases = read_physionet_database_directory(BASE_PHYSIONET_LOCATION)
 refresh_datafiles()
 
 
@@ -346,4 +367,4 @@ if __name__ == '__main__':
     # fig.set_size_inches(10, 12, forward=True)
     # fig.savefig("segment.png")
 
-    app.run()
+    app.run("0.0.0.0", os.environ.get('APP_PORT', '5000'))

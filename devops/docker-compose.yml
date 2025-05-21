@@ -1,0 +1,11 @@
+version: "2"
+
+services:
+  app:
+    image: ecg_research_demo
+    environment:
+      APP_BASE_PHYSIONET_LOCATION: "/physionet.org"
+    ports:
+      - "51000:5000"
+    volumes:
+      - "/Users/alantoo/Workspace/Edu/ecg_database/physionet.org:/physionet.org"
