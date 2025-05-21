@@ -20,7 +20,7 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            ghcr.io/ticketgenieio/${{ github.event.repository.name }}
+            ghcr.io/alantoo/${{ github.event.repository.name }}
           tags: |
             type=sha
             type=raw,enable=${{ github.ref == format('refs/heads/{0}', 'main') }},value=latest
@@ -36,26 +36,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set MAIN urls
-        if: github.ref == 'refs/heads/main'
-        run: |
-          echo "IDP_BASE_URL=https://api.ticketgenie.io/v1/idp" >> $GITHUB_ENV
-          echo "LICENSES_BASE_URL=https://api.ticketgenie.io/v1/license" >> $GITHUB_ENV
-
-      - name: Set DEV urls
-        if: github.ref == 'refs/heads/dev'
-        run: |
-          echo "IDP_BASE_URL=https://api.dev.ticketgenie.io/v1/idp" >> $GITHUB_ENV
-          echo "LICENSES_BASE_URL=https://api.dev.ticketgenie.io/v1/license" >> $GITHUB_ENV
-
       - name: Build and push Docker images
         uses: docker/build-push-action@v3
         with:
           build-args: |
             GITHUB_TOKEN=${{ secrets.GO_GITHUB_TOKEN }}
             BUF_TOKEN=${{ secrets.BUF_TOKEN }}
-            IDP_BASE_URL=${{ env.IDP_BASE_URL }}
-            LICENSES_BASE_URL=${{ env.LICENSES_BASE_URL }}
           context: .
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
