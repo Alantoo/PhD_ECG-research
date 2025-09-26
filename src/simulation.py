@@ -9,6 +9,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import resample
 
+from artifacts_config import ArtifactsConfig
+from segment_artifacts_config import SegmentArtifactsConfig
+
 
 def show_plot(title, t_data, sig_data):
     # Візуалізація
@@ -41,6 +44,13 @@ def interpolate_matrix(matrix, size=None):
         out.append(arr_stretch)
 
     return out
+
+
+def pick_random_unique_n(size: int, n: int):
+    seq = np.linspace(0, size - 1, size)
+    seq_copy = seq.copy().tolist()
+    np.random.shuffle(seq_copy)
+    return seq_copy[:n]
 
 
 class Simulation:
@@ -81,19 +91,19 @@ class Simulation:
 
         return points
 
-    def gen_ecg_from_prototype(self, signal_data, sampling_rate):
+    def gen_ecg_from_prototype(self, signal_data, sampling_rate, cfg: ArtifactsConfig):
         _, rpeaks = nk.ecg_peaks(signal_data, sampling_rate=sampling_rate)
         _, waves = nk.ecg_delineate(signal_data, rpeaks, sampling_rate=sampling_rate)
         ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / sampling_rate, 4))
         ECG_Q_Peaks = list(np.round(np.array(waves["ECG_Q_Peaks"]) / sampling_rate, 4))
-        # ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / sampling_rate, 4))
+        ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / sampling_rate, 4))
         ECG_S_Peaks = list(np.round(np.array(waves["ECG_S_Peaks"]) / sampling_rate, 4))
         ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / sampling_rate, 4))
 
         # ecg_fr = pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
         #                        "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
 
-        input_peaks = [ECG_P_Peaks, ECG_Q_Peaks, ECG_S_Peaks, ECG_T_Peaks]
+        input_peaks = [ECG_P_Peaks, ECG_Q_Peaks, ECG_R_Peaks, ECG_S_Peaks, ECG_T_Peaks]
         output_matrix = [list() for i in range(len(input_peaks))]
 
         time_signal_rhythm = []
@@ -134,9 +144,9 @@ class Simulation:
                 # show_plot("Complex", [i*time_ratio for i in range(len(complex_slice))], complex_slice)
             time_signal_rhythm.append(size)
 
-        return self.gen_ecg_from_matrix(output_matrix, time_peaks_rhythm)
+        return self.gen_ecg_from_matrix(output_matrix, time_peaks_rhythm, cfg)
 
-    def gen_ecg_from_matrix(self, ecg_matrix, rhythm_matrix):
+    def gen_ecg_from_matrix(self, ecg_matrix, rhythm_matrix, cfg: ArtifactsConfig):
         interpolated_matrix = []
         mean_matrix = []
         variance_matrix = []
@@ -176,21 +186,51 @@ class Simulation:
                 mean_rhythm = float(mean_time_rhythm[pidx])
                 time_rhythm.append(rhythm_v / mean_rhythm)
 
-        cycles_count = len(rhythm_matrix[0])
-        if cycles_count > 10:
-            cycles_count = 10
+        cycles_count = min(len(rhythm_matrix[0]), cfg.cycles_count if cfg.cycles_count > 0 else 10)
 
         segments_count = len(interpolated_matrix)
-        points = list()
-        last_time = 0
+        artifacts_idx = dict()
+        for c in cfg.segment_cfg:
+            insert_places = pick_random_unique_n(cycles_count, c.count_or_pos) if not c.exact_placement else [c.count_or_pos-1]
+            artifacts_idx[c.index] = {
+                "places": insert_places,
+                "cfg": c,
+            }
+
+        # points = list()
+        # last_time = 0
+        final_seq = {
+            'last_time': 0,
+            'points': list(),
+        }
+
+        def append_seg_point(t: list[float], v: list[float]):
+            last_tval = 0
+            for i in range(len(v)):
+                time = t[i] + final_seq['last_time']
+                value = v[i]
+                last_tval = time
+                final_seq['points'].append([time, value])
+
+            final_seq['last_time'] = last_tval
+
         for cycle_ix in range(cycles_count):
             for segment_ix in range(segments_count):
-                raw_data = interpolated_matrix[segment_ix][cycle_ix]
-
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
                 rhythm_v = float(raw_rhythm[cycle_ix])
-                rhythm_ratio = rhythm_v / mean_rhythm
+
+                artifact_data = artifacts_idx.get(segment_ix)
+                if artifact_data is not None and cycle_ix in artifact_data['places']:
+                    segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
+                    max_ts = segment_cfg.points[-1][0]
+                    rhythm_ratio = mean_rhythm / max_ts
+                    scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
+                    t, v = zip(*scaled_points)
+                    append_seg_point(t, v)
+                    continue
+
+                raw_data = interpolated_matrix[segment_ix][cycle_ix]
 
                 mean_data = mean_matrix[segment_ix]
                 mean_time = [i for i in range(len(mean_data))]
@@ -199,6 +239,7 @@ class Simulation:
 
                 # Інтерполяція для приведення до спільного часу
                 segment_duration = len(raw_data)
+                rhythm_ratio = rhythm_v / mean_rhythm
                 new_duration = int(segment_duration * rhythm_ratio)
                 t = np.linspace(0, new_duration, segment_duration)  # Спільний часовий інтервал
 
@@ -229,14 +270,15 @@ class Simulation:
                 # postprocessed = savgol_filter(ecg_signal, window_length=min(13, len(ecg_signal)), polyorder=3)
                 postprocessed = ecg_signal
                 # show_plot(f"Generated {segment_ix}", t, postprocessed)
-                last_tval = 0
-                for i in range(len(postprocessed)):
-                    time = t[i] + last_time
-                    value = postprocessed[i]
-                    last_tval = time
-                    points.append([time, value])
-
-                last_time = last_tval
+                append_seg_point(t, postprocessed)
+                # last_tval = 0
+                # for i in range(len(postprocessed)):
+                #     time = t[i] + last_time
+                #     value = postprocessed[i]
+                #     last_tval = time
+                #     points.append([time, value])
+                #
+                # last_time = last_tval
 
         def stats_matrix_to_points(matrix):
             data = []
@@ -256,4 +298,4 @@ class Simulation:
             "mean_rhythm": mean_time_rhythm
         }
 
-        return points, meta
+        return final_seq['points'], meta

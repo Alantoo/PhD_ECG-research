@@ -8,6 +8,7 @@ from flask import Flask, jsonify, Response, request
 from flask_cors import CORS, cross_origin
 from werkzeug.exceptions import NotFound
 
+from artifacts_config import ArtifactsConfig
 from gen_sig import to_np_array
 from get_config.ecg_config import ECGConfig
 from my_helpers.data_preparation import DataPreparation
@@ -257,7 +258,7 @@ def get_signal_raw_data(database, datafile, signal):
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
-@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/modelled')
+@app.post('/databases/<database>/data/<datafile>/signals/<int:signal>/modelled')
 def get_signal_modelled(database, datafile, signal):
     # key = cache_key(database, datafile, signal)
     # found = intervals_cache.get(key)
@@ -267,8 +268,22 @@ def get_signal_modelled(database, datafile, signal):
     cfg = new_cfg(database, datafile, signal)
     rhythm = GenerateRhythmFunction(cfg)
     data = rhythm.get_signal_raw_data(signal)
+
+    count = 0
+    exact_placement = False
+    segments = list()
+    body = request.get_json()
+    if body is not None and 'artifacts' in body:
+        artifacts = body['artifacts']
+        if artifacts is not None:
+            if 'count' in artifacts and 'segments' in artifacts:
+                count = int(artifacts['count'])
+                segments = artifacts['segments']
+
+    cfg =  ArtifactsConfig(count, segments)
+
     s = Simulation()
-    generated, meta = s.gen_ecg_from_prototype(data, 500)
+    generated, meta = s.gen_ecg_from_prototype(data, 500, cfg)
 
     # intervals_cache[key] = data
     result = {
@@ -367,4 +382,4 @@ if __name__ == '__main__':
     # fig.set_size_inches(10, 12, forward=True)
     # fig.savefig("segment.png")
 
-    app.run("0.0.0.0", os.environ.get('APP_PORT', '5000'))
+    app.run("0.0.0.0", os.environ.get('APP_PORT', '5100'))
