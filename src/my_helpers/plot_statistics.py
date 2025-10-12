@@ -14,7 +14,8 @@ class PlotStatistics():
         self.ecg_config = ecg_config
         self.statistics = statistics
         self.matrix_all = matrix_all
-        self.plot_path = f'{self.ecg_config.getImgPath()}/{self.ecg_config.getConfigBlock()}'
+
+        self.plot_path =  f'{self.ecg_config.getImgPath()}/{self.ecg_config.getConfigBlock()}' if self.ecg_config is not None else None
 
     def plotAutocorrelation(self):
         logger.info("Plot Autocorrelation")

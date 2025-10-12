@@ -4,7 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import simplejson as json
-from flask import Flask, jsonify, Response, request
+from flask import jsonify, Response, request
+from apiflask import APIFlask
 from flask_cors import CORS, cross_origin
 from werkzeug.exceptions import NotFound
 
@@ -16,7 +17,9 @@ from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.mathematical_statistics import MathematicalStatistics
 from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.read_data.read_data_file import ReadDataFile
+from preparedSignal import PreparedSignal
 from simulation import Simulation
+from flask_swagger_ui import get_swaggerui_blueprint
 import dotenv
 dotenv.load_dotenv()
 
@@ -52,7 +55,7 @@ def read_physionet_database_directory(base):
             }
     return db
 
-app = Flask(__name__)
+app = APIFlask(__name__)
 cors = CORS(app)
 # config_block = 'H_P001_PPG_S_S1'
 
@@ -87,6 +90,17 @@ def new_cfg(database, datafile, sig):
         'data_type': 'physionet',
     })
 
+
+swagger_ui_blueprint = get_swaggerui_blueprint(
+   '/swagger',
+   "/openapi.json",
+   config={
+       'app_name': 'Processing API'
+   }
+)
+
+app.register_blueprint(swagger_ui_blueprint, url_prefix='/swagger')
+# app.register_blueprint(blueprint_power)
 
 @app.route('/')
 def health():
@@ -150,7 +164,7 @@ def v2_get_databases():
     return jsonify(output)
 
 
-@app.get('/databases/<database>/data')
+@app.get('/databases/<string:database>/data')
 def get_database_data_files(database):
     db = databases[database]
     if db is None:
@@ -159,7 +173,7 @@ def get_database_data_files(database):
     return [fid for fid in db['datafiles']]
 
 
-@app.get('/databases/<database>/data/<datafile>/signals')
+@app.get('/databases/<string:database>/data/<string:datafile>/signals')
 def get_database_signals(database, datafile):
     cfg = new_cfg(database, datafile, 0)
     df = ReadDataFile(cfg)
@@ -167,6 +181,7 @@ def get_database_signals(database, datafile):
     def field_or_none(key, idx):
         if len(df.fileds[key]) > idx:
             return df.fileds[key][idx]
+        return None
 
     signals = [{
         'id': sidx,
@@ -185,7 +200,7 @@ def cache_key(database, datafile, signal):
     return database + "/" + datafile + "/" + str(signal)
 
 
-@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/math-stats')
+@app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/math-stats')
 def get_mat_stats(database, datafile, signal):
     key = cache_key(database, datafile, signal)
     found = math_cache.get(key)
@@ -216,7 +231,7 @@ def get_mat_stats(database, datafile, signal):
 intervals_cache = dict()
 
 
-@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/intervals')
+@app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/intervals')
 def get_intervals(database, datafile, signal):
     key = cache_key(database, datafile, signal)
     found = intervals_cache.get(key)
@@ -230,7 +245,7 @@ def get_intervals(database, datafile, signal):
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
-@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>')
+@app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>')
 def get_signal_data(database, datafile, signal):
     key = cache_key(database, datafile, signal)
     found = intervals_cache.get(key)
@@ -244,7 +259,7 @@ def get_signal_data(database, datafile, signal):
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
-@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/raw_values')
+@app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/raw_values')
 def get_signal_raw_data(database, datafile, signal):
     key = cache_key(database, datafile, signal)
     found = intervals_cache.get(key)
@@ -258,7 +273,7 @@ def get_signal_raw_data(database, datafile, signal):
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
-@app.post('/databases/<database>/data/<datafile>/signals/<int:signal>/modelled')
+@app.post('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/modelled')
 def get_signal_modelled(database, datafile, signal):
     # key = cache_key(database, datafile, signal)
     # found = intervals_cache.get(key)
@@ -297,7 +312,7 @@ def get_signal_modelled(database, datafile, signal):
 rhythm_cache = dict()
 
 
-@app.get('/databases/<database>/data/<datafile>/signals/<int:signal>/rhythm')
+@app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/rhythm')
 def get_rhythm(database, datafile, signal):
     key = cache_key(database, datafile, signal)
     found = rhythm_cache.get(key)
@@ -318,6 +333,26 @@ def to_np_array_on_demand(array):
         return array
 
     return to_np_array(array)
+
+@app.post('/math-stats')
+def generate_mat_stats():
+    rawSignal = request.get_json()
+
+    input = rawSignal
+    if len(rawSignal) > 2 and len(rawSignal[0]) == 2:
+        input = np.transpose(rawSignal).tolist()[1]
+
+    prepared = PreparedSignal(input, 500)
+    # cfg = new_cfg(database, datafile, signal)
+    # statistics = MathematicalStatistics(input)
+    #
+    # stats = PlotStatistics(statistics, 500, None,
+    #                        input).get_math_stats_points()
+
+    stats = prepared.math_stats
+
+    json_data = json.dumps(stats, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
 
 @app.post('/modelling/ecg')
 def simulate_ecg():
