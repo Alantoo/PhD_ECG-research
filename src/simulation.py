@@ -191,7 +191,8 @@ class Simulation:
         segments_count = len(interpolated_matrix)
         artifacts_idx = dict()
         for c in cfg.segment_cfg:
-            insert_places = pick_random_unique_n(cycles_count, c.count_or_pos) if not c.exact_placement else [c.count_or_pos-1]
+            insert_places = pick_random_unique_n(cycles_count, c.count_or_pos) if not c.exact_placement else [
+                c.count_or_pos - 1]
             artifacts_idx[c.index] = {
                 "places": insert_places,
                 "cfg": c,
@@ -279,6 +280,108 @@ class Simulation:
                 #     points.append([time, value])
                 #
                 # last_time = last_tval
+
+        def stats_matrix_to_points(matrix):
+            data = []
+            for row in matrix:
+                data.extend(row)
+            data_time = np.linspace(0, len(data), len(data))
+            output_points = []
+            for i in range(len(data)):
+                output_points.append([data_time[i], data[i]])
+
+            return output_points
+
+        meta = {
+            "mean": stats_matrix_to_points(mean_matrix),
+            "variance": stats_matrix_to_points(variance_matrix),
+            "rhythm": stats_matrix_to_points(rhythm_matrix),
+            "mean_rhythm": mean_time_rhythm
+        }
+
+        return final_seq['points'], meta
+
+    def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig):
+        def to_matrix(time_series):
+            values = time_series[1]
+            matrix = list()
+            for ix in range(segments_count):
+                rsix = int(ix * (len(values) / segments_count))
+                reix = int((rsix+(len(values) / segments_count)))
+                matrix.append(values[rsix:reix])
+            return matrix
+
+        mean_matrix, variance_matrix, rhythm_matrix = to_matrix(mean), to_matrix(variance), to_matrix(rhythm)
+        mean_time_rhythm = [np.mean(i) for i in rhythm_matrix]
+        time_rhythm = []
+        for i in range(len(rhythm_matrix[0])):
+            for pidx in range(len(rhythm_matrix)):
+                rhythm_v = float(rhythm_matrix[pidx][i])
+                mean_rhythm = float(mean_time_rhythm[pidx])
+                time_rhythm.append(rhythm_v / mean_rhythm)
+
+        cycles_count = min(len(rhythm_matrix[0]), cfg.cycles_count if cfg.cycles_count > 0 else 10)
+
+        artifacts_idx = dict()
+        for c in cfg.segment_cfg:
+            insert_places = pick_random_unique_n(cycles_count, c.count_or_pos) if not c.exact_placement else [
+                c.count_or_pos - 1]
+            artifacts_idx[c.index] = {
+                "places": insert_places,
+                "cfg": c,
+            }
+
+        # points = list()
+        # last_time = 0
+        final_seq = {
+            'last_time': 0,
+            'points': list(),
+        }
+
+        def append_seg_point(t: list[float], v: list[float]):
+            last_tval = 0
+            for i in range(len(v)):
+                time = t[i] + final_seq['last_time']
+                value = v[i]
+                last_tval = time
+                final_seq['points'].append([time, value])
+
+            final_seq['last_time'] = last_tval
+
+        for cycle_ix in range(cycles_count):
+            for segment_ix in range(segments_count):
+                raw_rhythm = rhythm_matrix[segment_ix]
+                mean_rhythm = float(mean_time_rhythm[segment_ix])
+                rhythm_v = float(raw_rhythm[cycle_ix])
+
+                artifact_data = artifacts_idx.get(segment_ix)
+                if artifact_data is not None and cycle_ix in artifact_data['places']:
+                    segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
+                    max_ts = segment_cfg.points[-1][0]
+                    rhythm_ratio = mean_rhythm / max_ts
+                    scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
+                    t, v = zip(*scaled_points)
+                    append_seg_point(t, v)
+                    continue
+
+                mean_data = mean_matrix[segment_ix]
+                variance_data = variance_matrix[segment_ix]
+
+                # Інтерполяція для приведення до спільного часу
+                segment_duration = len(mean_data)
+                rhythm_ratio = rhythm_v / mean_rhythm
+                new_duration = int(segment_duration * rhythm_ratio)
+                t = np.linspace(0, new_duration, segment_duration)  # Спільний часовий інтервал
+
+                # Генерація циклічного сигналу
+                direction = 1
+                if bool(random.getrandbits(1)):
+                    direction = -1
+
+                ecg_signal = mean_data + direction * np.sqrt(np.abs(variance_data))
+
+                postprocessed = ecg_signal
+                append_seg_point(t, postprocessed)
 
         def stats_matrix_to_points(matrix):
             data = []

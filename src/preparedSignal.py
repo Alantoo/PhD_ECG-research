@@ -62,6 +62,45 @@ class PreparedSignal:
         matrix_R_T = []
         matrix_T_P = []
 
+
+        input_peaks = [ECG_P_Peaks, ECG_Q_Peaks, ECG_R_Peaks, ECG_S_Peaks, ECG_T_Peaks]
+        time_signal_rhythm = []
+        time_peaks_rhythm = [list() for i in range(len(input_peaks))]
+        for i in range(len(ECG_P_Peaks) - 1):
+            # curr_signal = signal_data[int(ECG_P_Peaks[i] * sampling_rate):int(ECG_P_Peaks[i + 1] * sampling_rate)]
+            # show_plot("Signal", [i for i in range(len(curr_signal))], curr_signal)
+            size = 0
+            for peak_idx in range(len(input_peaks)):
+                def replace_nan(val):
+                    if np.isnan(val):
+                        return 0
+                    return val
+
+                curr_complex = input_peaks[peak_idx]
+                next_cmp_idx = peak_idx + 1
+                curr_peak_idx = i
+                next_peak_idx = i
+                if next_cmp_idx == len(input_peaks):
+                    next_cmp_idx = 0
+                    next_peak_idx = i + 1
+
+                next_complex = input_peaks[next_cmp_idx]
+                start_peak = curr_complex[curr_peak_idx]
+                start = int(replace_nan(start_peak) * sampling_rate)
+                next_peak = next_complex[next_peak_idx]
+                if np.isnan(next_peak):
+                    next_peak = input_peaks[0][i + 1]
+
+                end = int(replace_nan(next_peak) * sampling_rate)
+                complex_slice = signal[start:end]
+                curr_duration = len(complex_slice)
+                size += curr_duration
+
+                time_peaks_rhythm[peak_idx].append(curr_duration)
+                # time_ratio = len(complex_slice) / sampling_rate
+                # show_plot("Complex", [i*time_ratio for i in range(len(complex_slice))], complex_slice)
+            time_signal_rhythm.append(size)
+
         for i in range(len(self.ECG_P_Peaks) - 1):
             def replaceNaN(val):
                 if np.isnan(val):
@@ -70,8 +109,8 @@ class PreparedSignal:
 
             def appendIfNotNaN(segA, segB, lst):
 
-                start = int(replaceNaN(segA[i]) * self.sampling_rate)
-                end = int(replaceNaN(segB[i]) * self.sampling_rate)
+                start = int(replace_nan(segA[i]) * self.sampling_rate)
+                end = int(replace_nan(segB[i]) * self.sampling_rate)
 
                 sig_name = self.ecg_config.getSigName()
                 sig = self.signals[sig_name]
@@ -186,6 +225,17 @@ class PreparedSignal:
                 points.append([time[i], raw_list[i]])
             return points
 
+        def stats_matrix_to_points(matrix):
+            data = []
+            for row in matrix:
+                data.extend(row)
+            data_time = np.linspace(0, len(data), len(data))
+            output_points = []
+            for i in range(len(data)):
+                output_points.append([data_time[i], data[i]])
+
+            return output_points
+
         self.math_stats = {
             "mathematical_expectation": to_data_points(mathematicalExpectation),
             "initial_moments_second_order": to_data_points(initialMomentsSecondOrder),
@@ -193,5 +243,5 @@ class PreparedSignal:
             "initial_moments_fourth_order": to_data_points(initialMomentsFourthOrder),
             "central_moment_functions_fourth_order": to_data_points(centralMomentFunctionsFourthOrder),
             "variance": to_data_points(variance),
-            # "rhythm": to_data_points(rhythm.tolist()),
+            "rhythm": stats_matrix_to_points(time_peaks_rhythm),
         }

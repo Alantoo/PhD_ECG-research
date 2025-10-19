@@ -21,6 +21,7 @@ from preparedSignal import PreparedSignal
 from simulation import Simulation
 from flask_swagger_ui import get_swaggerui_blueprint
 import dotenv
+
 dotenv.load_dotenv()
 
 
@@ -54,6 +55,7 @@ def read_physionet_database_directory(base):
                 'datafiles': dict(),
             }
     return db
+
 
 app = APIFlask(__name__)
 cors = CORS(app)
@@ -92,14 +94,16 @@ def new_cfg(database, datafile, sig):
 
 
 swagger_ui_blueprint = get_swaggerui_blueprint(
-   '/swagger',
-   "/openapi.json",
-   config={
-       'app_name': 'Processing API'
-   }
+    '/swagger',
+    "/openapi.json",
+    config={
+        'app_name': 'Processing API'
+    }
 )
 
 app.register_blueprint(swagger_ui_blueprint, url_prefix='/swagger')
+
+
 # app.register_blueprint(blueprint_power)
 
 @app.route('/')
@@ -116,7 +120,10 @@ def get_databases():
         'files': db['datafiles'],
     } for db_id, db in databases.items()])
 
+
 v2dbs_cache = dict()
+
+
 @app.get('/v2/databases')
 @cross_origin()
 def v2_get_databases():
@@ -131,6 +138,7 @@ def v2_get_databases():
         for k in db['datafiles']:
             cfg = new_cfg(db_id, k, 0)
             df = ReadDataFile(cfg)
+
             def field_or_none(key, idx):
                 if len(df.fileds[key]) > idx:
                     return df.fileds[key][idx]
@@ -245,6 +253,7 @@ def get_intervals(database, datafile, signal):
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
+
 @app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>')
 def get_signal_data(database, datafile, signal):
     key = cache_key(database, datafile, signal)
@@ -259,6 +268,7 @@ def get_signal_data(database, datafile, signal):
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
 
+
 @app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/raw_values')
 def get_signal_raw_data(database, datafile, signal):
     key = cache_key(database, datafile, signal)
@@ -272,6 +282,7 @@ def get_signal_raw_data(database, datafile, signal):
 
     intervals_cache[key] = data
     return Response(json.dumps(data, ignore_nan=True, cls=NumpyEncoder), mimetype='application/json')
+
 
 @app.post('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/modelled')
 def get_signal_modelled(database, datafile, signal):
@@ -295,7 +306,7 @@ def get_signal_modelled(database, datafile, signal):
                 count = int(artifacts['count'])
                 segments = artifacts['segments']
 
-    cfg =  ArtifactsConfig(count, segments)
+    cfg = ArtifactsConfig(count, segments)
 
     s = Simulation()
     generated, meta = s.gen_ecg_from_prototype(data, 500, cfg)
@@ -334,6 +345,7 @@ def to_np_array_on_demand(array):
 
     return to_np_array(array)
 
+
 @app.post('/math-stats')
 def generate_mat_stats():
     rawSignal = request.get_json()
@@ -354,6 +366,7 @@ def generate_mat_stats():
     json_data = json.dumps(stats, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
+
 @app.post('/modelling/ecg')
 def simulate_ecg():
     body = request.get_json()
@@ -365,6 +378,37 @@ def simulate_ecg():
     sim = Simulation()
     cycle_data = sim.gen_cycle(rhythm_data, variance_data, mean_data, cycles_count)
     json_data = json.dumps(cycle_data, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+@app.post('/v2/modelling/math_stats')
+def simulate_ecg_from_math_stats():
+    body = request.get_json()
+    count = 0
+    segments_count = 5
+    segments = list()
+    if body is not None and 'artifacts' in body:
+        artifacts = body['artifacts']
+        if artifacts is not None:
+            if 'count' in artifacts:
+                count = int(artifacts['count'])
+            if 'segments' in artifacts:
+                segments = artifacts['segments']
+
+    cfg = ArtifactsConfig(count, segments)
+
+    variance_data = to_np_array_on_demand(body['variance'])
+    mean_data = to_np_array_on_demand(body['mean'])
+    rhythm_data = to_np_array_on_demand(body['rhythm'])
+
+    sim = Simulation()
+    generated, meta = sim.gen_ecg_from_math_stats(segments_count, mean_data, variance_data, rhythm_data, cfg)
+
+    # intervals_cache[key] = data
+    result = {
+        "signal": generated,
+        "meta": meta,
+    }
+    json_data = json.dumps(result, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
 
