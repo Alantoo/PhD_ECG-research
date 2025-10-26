@@ -117,18 +117,32 @@ class PreparedSignal:
                 item = sig[start:end]
                 lst.append(item)
 
+            def slice(matrixLeft, matrixRight, rate, i):
+                start = int(replaceNaN(matrixLeft[i]) * rate)
+
+                end = int(replaceNaN(matrixRight[i]) * rate)
+                return signal[start:end]
+
             # appendIfNotNaN(self.ECG_P_Peaks, self.ECG_R_Peaks, matrix_P_R)
             # appendIfNotNaN(self.ECG_R_Peaks, self.ECG_T_Peaks, matrix_R_T)
             # appendIfNotNaN(self.ECG_T_Peaks, self.ECG_P_Peaks, matrix_T_P)
             start = int(replaceNaN(self.ECG_P_Peaks[i]) * self.sampling_rate)
             end = int(replaceNaN(self.ECG_R_Peaks[i]) * self.sampling_rate)
-            matrix_P_R.append(signal[start:end])
+
+            pr =  signal[start:end] # slice(self.ECG_P_Peaks, self.ECG_R_Peaks, self.sampling_rate)
             start = int(replaceNaN(self.ECG_R_Peaks[i]) * self.sampling_rate)
             end = int(replaceNaN(self.ECG_T_Peaks[i]) * self.sampling_rate)
-            matrix_R_T.append(signal[start:end])
+            rt = signal[start:end]
             start = int(replaceNaN(self.ECG_T_Peaks[i]) * self.sampling_rate)
             end = int(replaceNaN(self.ECG_P_Peaks[i + 1]) * self.sampling_rate)
-            matrix_T_P.append(signal[start:end])
+            tp = signal[start:end]
+
+            if len(pr) == 0 or len(rt) == 0 or len(tp) == 0:
+                continue
+
+            matrix_P_R.append(pr)
+            matrix_R_T.append(rt)
+            matrix_T_P.append(tp)
 
         self.matrix_T_P = matrix_T_P
         self.matrix_P_R = matrix_P_R

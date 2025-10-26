@@ -2,11 +2,13 @@ import glob
 import os
 from pathlib import Path
 
+import dotenv
 import numpy as np
 import simplejson as json
-from flask import jsonify, Response, request
 from apiflask import APIFlask
+from flask import jsonify, Response, request
 from flask_cors import CORS, cross_origin
+from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.exceptions import NotFound
 
 from artifacts_config import ArtifactsConfig
@@ -17,10 +19,10 @@ from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.mathematical_statistics import MathematicalStatistics
 from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.read_data.read_data_file import ReadDataFile
+from pipeline import butter_bandpass, apply_detrend, \
+    defaults_process_ecg_pipeline, defaults_decimate_signal
 from preparedSignal import PreparedSignal
 from simulation import Simulation
-from flask_swagger_ui import get_swaggerui_blueprint
-import dotenv
 
 dotenv.load_dotenv()
 
@@ -367,6 +369,30 @@ def generate_mat_stats():
     return Response(json_data, mimetype='application/json')
 
 
+@app.post('/proc/<string:op>')
+def apply_processing_fn(op):
+    raw_signal = request.get_json()
+
+    src_t = np.transpose(raw_signal).tolist()[0]
+    src_x = np.transpose(raw_signal).tolist()[1]
+
+    ops = {
+        'detrend': lambda sig: (apply_detrend(sig), src_t),
+        'butter_bandpass': lambda sig: (butter_bandpass(sig, 500), src_t),
+        'decimate': lambda sig: defaults_decimate_signal(sig),
+        'preprocess_pipeline': lambda sig: defaults_process_ecg_pipeline(sig),
+    }
+
+    processor = ops[op]
+
+    x, t = processor(src_x)
+
+    result = np.transpose([t, x]).tolist()
+
+    json_data = json.dumps(result, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+
 @app.post('/modelling/ecg')
 def simulate_ecg():
     body = request.get_json()
@@ -379,6 +405,7 @@ def simulate_ecg():
     cycle_data = sim.gen_cycle(rhythm_data, variance_data, mean_data, cycles_count)
     json_data = json.dumps(cycle_data, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
+
 
 @app.post('/v2/modelling/math_stats')
 def simulate_ecg_from_math_stats():
