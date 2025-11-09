@@ -9,4 +9,6 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD [ "python3", "src/main.py", "--host=0.0.0.0"]
+WORKDIR /app/src
+
+CMD [ "python3", "main.py", "--host=0.0.0.0"]
