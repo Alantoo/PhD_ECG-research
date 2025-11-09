@@ -12,6 +12,7 @@ from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.exceptions import NotFound
 
 from artifacts_config import ArtifactsConfig
+from classification_signal import EnsembleSignalClassifier
 from gen_sig import to_np_array
 from get_config.ecg_config import ECGConfig
 from my_helpers.data_preparation import DataPreparation
@@ -363,9 +364,35 @@ def generate_mat_stats():
     # stats = PlotStatistics(statistics, 500, None,
     #                        input).get_math_stats_points()
 
-    stats = prepared.math_stats
+    stats = prepared.get_stats()
 
     json_data = json.dumps(stats, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+@app.post('/classify')
+def classify():
+    rawSignal = request.get_json()
+
+    input = rawSignal
+    if len(rawSignal) > 2 and len(rawSignal[0]) == 2:
+        input = np.transpose(rawSignal).tolist()[1]
+
+    prepared = PreparedSignal(input, 500)
+    test_data, _ = prepared.get_interpolated_matrix()
+    testing = EnsembleSignalClassifier()
+    result = testing.classifySignal(
+        model_paths=None,
+        test_data=test_data
+    )
+    # cfg = new_cfg(database, datafile, signal)
+    # statistics = MathematicalStatistics(input)
+    #
+    # stats = PlotStatistics(statistics, 500, None,
+    #                        input).get_math_stats_points()
+
+    json_data = json.dumps({
+        "class": result,
+    }, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
 

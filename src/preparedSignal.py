@@ -7,15 +7,8 @@ import scipy.interpolate as interp
 class PreparedSignal:
     def __init__(self, signal, sampling_rate):
         self.sampling_rate = sampling_rate
-        multiplier = 1
-
-        def getNewMatrixSize(matrix):
-            n = 0
-            for i in range(len(matrix)):
-                n = n + len(matrix[i])
-            n = int((n / len(matrix)) * multiplier)
-            n = int(len(matrix[0]) * multiplier)
-            return n
+        self.signal = signal
+        self.multiplier = 1
 
         _, rpeaks = nk.ecg_peaks(signal, sampling_rate=self.sampling_rate)
         _, waves = nk.ecg_delineate(signal, rpeaks, sampling_rate=self.sampling_rate)
@@ -27,46 +20,29 @@ class PreparedSignal:
 
         ecg_fr = pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
                                "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
-        self.ECG_T_Peaks = ecg_fr["ECG_T_Peaks"]
+        self.rpeaks = rpeaks
+        self.waves = waves
+        self.ecg_fr = ecg_fr
         self.ECG_P_Peaks = ecg_fr["ECG_P_Peaks"]
+        self.ECG_Q_Peaks = ecg_fr["ECG_Q_Peaks"]
         self.ECG_R_Peaks = ecg_fr["ECG_R_Peaks"]
+        self.ECG_S_Peaks = ecg_fr["ECG_S_Peaks"]
+        self.ECG_T_Peaks = ecg_fr["ECG_T_Peaks"]
 
         self.Q_S_exist = ("ECG_Q_Peaks" in ecg_fr and "ECG_S_Peaks" in ecg_fr)
 
-        # Line block
-        # T1_ECG_T_Peaks = []
-        # T1_ECG_P_Peaks = []
-        # T1_ECG_R_Peaks = []
-        # T1_Y = []
-        # for i in range(len(self.ECG_T_Peaks)-1):
-        #     T1_ECG_T_Peaks.append(round(self.ECG_T_Peaks[i+1] - self.ECG_T_Peaks[i], 2))
-
-        # for i in range(len(self.ECG_P_Peaks)-1):
-        #     T1_ECG_P_Peaks.append(round(self.ECG_P_Peaks[i+1] - self.ECG_P_Peaks[i], 2))
-
-        # for i in range(len(self.ECG_R_Peaks)-1):
-        #     T1_ECG_R_Peaks.append(round(self.ECG_R_Peaks[i+1] - self.ECG_R_Peaks[i], 2))
-
-        # for i in range(len(T1_ECG_P_Peaks)):
-        #     T1_Y.append(T1_ECG_P_Peaks[i])
-        #     T1_Y.append(T1_ECG_R_Peaks[i])
-        #     T1_Y.append(T1_ECG_T_Peaks[i])
-
-        # m = np.mean(T1_Y)
-
-        # self.ECG_T_Peaks = np.arange(self.ECG_T_Peaks.iloc[0], self.ECG_T_Peaks.iloc[-1] - 1, m)
-        # self.ECG_R_Peaks = np.arange(self.ECG_R_Peaks.iloc[0], self.ECG_R_Peaks.iloc[-1] - 1, m)
-        # self.ECG_P_Peaks = np.arange(self.ECG_P_Peaks.iloc[0], self.ECG_P_Peaks.iloc[-1] - 1, m)
+        if self.Q_S_exist:
+            self.ECG_Q_Peaks = self.ecg_fr["ECG_Q_Peaks"]
+            self.ECG_S_Peaks = self.ecg_fr["ECG_S_Peaks"]
 
         matrix_P_R = []
         matrix_R_T = []
         matrix_T_P = []
 
-
-        input_peaks = [ECG_P_Peaks, ECG_Q_Peaks, ECG_R_Peaks, ECG_S_Peaks, ECG_T_Peaks]
+        input_peaks = [self.ECG_P_Peaks, self.ECG_Q_Peaks, self.ECG_R_Peaks, self.ECG_S_Peaks, self.ECG_T_Peaks]
         time_signal_rhythm = []
         time_peaks_rhythm = [list() for i in range(len(input_peaks))]
-        for i in range(len(ECG_P_Peaks) - 1):
+        for i in range(len(self.ECG_P_Peaks) - 1):
             # curr_signal = signal_data[int(ECG_P_Peaks[i] * sampling_rate):int(ECG_P_Peaks[i + 1] * sampling_rate)]
             # show_plot("Signal", [i for i in range(len(curr_signal))], curr_signal)
             size = 0
@@ -86,13 +62,13 @@ class PreparedSignal:
 
                 next_complex = input_peaks[next_cmp_idx]
                 start_peak = curr_complex[curr_peak_idx]
-                start = int(replace_nan(start_peak) * sampling_rate)
+                start = int(replace_nan(start_peak) * self.sampling_rate)
                 next_peak = next_complex[next_peak_idx]
                 if np.isnan(next_peak):
                     next_peak = input_peaks[0][i + 1]
 
-                end = int(replace_nan(next_peak) * sampling_rate)
-                complex_slice = signal[start:end]
+                end = int(replace_nan(next_peak) * self.sampling_rate)
+                complex_slice = self.signal[start:end]
                 curr_duration = len(complex_slice)
                 size += curr_duration
 
@@ -121,7 +97,7 @@ class PreparedSignal:
                 start = int(replaceNaN(matrixLeft[i]) * rate)
 
                 end = int(replaceNaN(matrixRight[i]) * rate)
-                return signal[start:end]
+                return self.signal[start:end]
 
             # appendIfNotNaN(self.ECG_P_Peaks, self.ECG_R_Peaks, matrix_P_R)
             # appendIfNotNaN(self.ECG_R_Peaks, self.ECG_T_Peaks, matrix_R_T)
@@ -129,13 +105,13 @@ class PreparedSignal:
             start = int(replaceNaN(self.ECG_P_Peaks[i]) * self.sampling_rate)
             end = int(replaceNaN(self.ECG_R_Peaks[i]) * self.sampling_rate)
 
-            pr =  signal[start:end] # slice(self.ECG_P_Peaks, self.ECG_R_Peaks, self.sampling_rate)
+            pr = self.signal[start:end]  # slice(self.ECG_P_Peaks, self.ECG_R_Peaks, self.sampling_rate)
             start = int(replaceNaN(self.ECG_R_Peaks[i]) * self.sampling_rate)
             end = int(replaceNaN(self.ECG_T_Peaks[i]) * self.sampling_rate)
-            rt = signal[start:end]
+            rt = self.signal[start:end]
             start = int(replaceNaN(self.ECG_T_Peaks[i]) * self.sampling_rate)
             end = int(replaceNaN(self.ECG_P_Peaks[i + 1]) * self.sampling_rate)
-            tp = signal[start:end]
+            tp = self.signal[start:end]
 
             if len(pr) == 0 or len(rt) == 0 or len(tp) == 0:
                 continue
@@ -147,16 +123,20 @@ class PreparedSignal:
         self.matrix_T_P = matrix_T_P
         self.matrix_P_R = matrix_P_R
         self.matrix_R_T = matrix_R_T
+        self.time_peaks_rhythm = time_peaks_rhythm
 
-        if self.Q_S_exist:
-            self.ECG_Q_Peaks = ecg_fr["ECG_Q_Peaks"]
-            self.ECG_S_Peaks = ecg_fr["ECG_S_Peaks"]
-
-        self.mod_sampling_rate = int(self.sampling_rate * multiplier)
-
-        matrix_T_P_size = getNewMatrixSize(self.matrix_T_P)
-        matrix_P_R_size = getNewMatrixSize(self.matrix_P_R)
-        matrix_R_T_size = getNewMatrixSize(self.matrix_R_T)
+    def get_interpolated_matrix(self):
+        # def getNewMatrixSize(matrix):
+        #     n = 0
+        #     for i in range(len(matrix)):
+        #         n = n + len(matrix[i])
+        #     n = int((n / len(matrix)) * self.multiplier)
+        #     n = int(len(matrix[0]) * self.multiplier)
+        #     return n
+        #
+        # matrix_T_P_size = getNewMatrixSize(self.matrix_T_P)
+        # matrix_P_R_size = getNewMatrixSize(self.matrix_P_R)
+        # matrix_R_T_size = getNewMatrixSize(self.matrix_R_T)
 
         # print(matrix_T_P_size)
         # print(matrix_P_R_size)
@@ -169,7 +149,6 @@ class PreparedSignal:
         interp_matrix_T_P = []
         interp_matrix_P_R = []
         interp_matrix_R_T = []
-        self.interp_matrix_all = []
 
         for i in range(len(self.matrix_T_P)):
             arr = np.array(self.matrix_T_P[i])
@@ -193,18 +172,25 @@ class PreparedSignal:
 
         # self.interp_matrix_all = interp_matrix_all
 
+
+        mod_sampling_rate = int(self.sampling_rate * self.multiplier)
+        interp_matrix = []
         for i in range(len(interp_matrix_all)):
             arr = np.array(interp_matrix_all[i])
             arr_interp = interp.interp1d(np.arange(arr.size), arr)
-            arr_stretch = arr_interp(np.linspace(0, arr.size - 1, self.mod_sampling_rate))
-            self.interp_matrix_all.append(arr_stretch)
+            arr_stretch = arr_interp(np.linspace(0, arr.size - 1, mod_sampling_rate))
+            interp_matrix.append(arr_stretch.tolist())
 
-        m_m = np.mean(self.interp_matrix_all, 1)
+        return interp_matrix, mod_sampling_rate
 
-        data = self.interp_matrix_all - m_m[:, None]
+    def get_stats(self):
+        interp_matrix_all, _ = self.get_interpolated_matrix()
+
+        m_m = np.mean(interp_matrix_all, 1)
+
+        data = interp_matrix_all - m_m[:, None]
 
         data = np.transpose(data)
-        self.data = data
         # Mathematical expectation
         mathematicalExpectation = [np.mean(i) for i in data]
         # self.variance__ = [np.var(i) for i in data]
@@ -250,12 +236,12 @@ class PreparedSignal:
 
             return output_points
 
-        self.math_stats = {
+        return {
             "mathematical_expectation": to_data_points(mathematicalExpectation),
             "initial_moments_second_order": to_data_points(initialMomentsSecondOrder),
             "initial_moments_third_order": to_data_points(initialMomentsThirdOrder),
             "initial_moments_fourth_order": to_data_points(initialMomentsFourthOrder),
             "central_moment_functions_fourth_order": to_data_points(centralMomentFunctionsFourthOrder),
             "variance": to_data_points(variance),
-            "rhythm": stats_matrix_to_points(time_peaks_rhythm),
+            "rhythm": stats_matrix_to_points(self.time_peaks_rhythm),
         }
