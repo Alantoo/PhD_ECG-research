@@ -307,18 +307,18 @@ class Simulation:
             matrix = list()
             for ix in range(segments_count):
                 rsix = int(ix * (len(values) / segments_count))
-                reix = int((rsix+(len(values) / segments_count)))
+                reix = int((rsix + (len(values) / segments_count)))
                 matrix.append(values[rsix:reix])
             return matrix
 
-        mean_matrix, variance_matrix, rhythm_matrix = to_matrix(mean), to_matrix(variance), to_matrix(rhythm)
+        def to_rhythm_matrix(time_series):
+            # Rhythm is interleaved: [R1→R2, P1→P2, T1→T2, Q1→Q2, S1→S2, R2→R3, ...]
+            # Stride by segments_count to recover per-peak-type interval lists
+            values = time_series[1]
+            return [list(values[ix::segments_count]) for ix in range(segments_count)]
+
+        mean_matrix, variance_matrix, rhythm_matrix = to_matrix(mean), to_matrix(variance), to_rhythm_matrix(rhythm)
         mean_time_rhythm = [np.mean(i) for i in rhythm_matrix]
-        time_rhythm = []
-        for i in range(len(rhythm_matrix[0])):
-            for pidx in range(len(rhythm_matrix)):
-                rhythm_v = float(rhythm_matrix[pidx][i])
-                mean_rhythm = float(mean_time_rhythm[pidx])
-                time_rhythm.append(rhythm_v / mean_rhythm)
 
         cycles_count = min(len(rhythm_matrix[0]), cfg.cycles_count if cfg.cycles_count > 0 else 10)
 

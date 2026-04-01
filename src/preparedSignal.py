@@ -2,6 +2,7 @@ import numpy as np
 import neurokit2 as nk
 import pandas as pd
 import scipy.interpolate as interp
+import wfdb.processing
 
 
 class PreparedSignal:
@@ -10,8 +11,10 @@ class PreparedSignal:
         self.signal = signal
         self.multiplier = 1
 
-        _, rpeaks = nk.ecg_peaks(signal, sampling_rate=self.sampling_rate)
-        _, waves = nk.ecg_delineate(signal, rpeaks, sampling_rate=self.sampling_rate)
+        cleaned = nk.ecg_clean(signal, sampling_rate=self.sampling_rate)
+        r_indices = wfdb.processing.xqrs_detect(np.array(cleaned, dtype=float), fs=self.sampling_rate, verbose=False)
+        rpeaks = {"ECG_R_Peaks": r_indices}
+        _, waves = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate)
         ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate, 4))
         ECG_Q_Peaks = list(np.round(np.array(waves["ECG_Q_Peaks"]) / self.sampling_rate, 4))
         ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate, 4))
@@ -39,43 +42,25 @@ class PreparedSignal:
         matrix_R_T = []
         matrix_T_P = []
 
-        input_peaks = [self.ECG_P_Peaks, self.ECG_Q_Peaks, self.ECG_R_Peaks, self.ECG_S_Peaks, self.ECG_T_Peaks]
-        time_signal_rhythm = []
-        time_peaks_rhythm = [list() for i in range(len(input_peaks))]
-        for i in range(len(self.ECG_P_Peaks) - 1):
-            # curr_signal = signal_data[int(ECG_P_Peaks[i] * sampling_rate):int(ECG_P_Peaks[i + 1] * sampling_rate)]
-            # show_plot("Signal", [i for i in range(len(curr_signal))], curr_signal)
-            size = 0
-            for peak_idx in range(len(input_peaks)):
-                def replace_nan(val):
-                    if np.isnan(val):
-                        return 0
-                    return val
+        def to_valid(peaks):
+            return [float(v) for v in peaks if not np.isnan(float(v))]
 
-                curr_complex = input_peaks[peak_idx]
-                next_cmp_idx = peak_idx + 1
-                curr_peak_idx = i
-                next_peak_idx = i
-                if next_cmp_idx == len(input_peaks):
-                    next_cmp_idx = 0
-                    next_peak_idx = i + 1
+        peak_series = [
+            to_valid(ECG_R_Peaks),
+            to_valid(ECG_P_Peaks),
+            to_valid(ECG_T_Peaks),
+            to_valid(ECG_Q_Peaks),
+            to_valid(ECG_S_Peaks),
+        ]
+        n_intervals = min(len(p) for p in peak_series) - 1
 
-                next_complex = input_peaks[next_cmp_idx]
-                start_peak = curr_complex[curr_peak_idx]
-                start = int(replace_nan(start_peak) * self.sampling_rate)
-                next_peak = next_complex[next_peak_idx]
-                if np.isnan(next_peak):
-                    next_peak = input_peaks[0][i + 1]
-
-                end = int(replace_nan(next_peak) * self.sampling_rate)
-                complex_slice = self.signal[start:end]
-                curr_duration = len(complex_slice)
-                size += curr_duration
-
-                time_peaks_rhythm[peak_idx].append(curr_duration)
-                # time_ratio = len(complex_slice) / sampling_rate
-                # show_plot("Complex", [i*time_ratio for i in range(len(complex_slice))], complex_slice)
-            time_signal_rhythm.append(size)
+        rhythm_points = []
+        beat_idx = 1
+        for i in range(n_intervals):
+            for peaks in peak_series:
+                rhythm_points.append([beat_idx, round(peaks[i + 1] - peaks[i], 4)])
+                beat_idx += 1
+        self.rhythm_points = rhythm_points
 
         for i in range(len(self.ECG_P_Peaks) - 1):
             def replaceNaN(val):
@@ -123,7 +108,6 @@ class PreparedSignal:
         self.matrix_T_P = matrix_T_P
         self.matrix_P_R = matrix_P_R
         self.matrix_R_T = matrix_R_T
-        self.time_peaks_rhythm = time_peaks_rhythm
 
     def get_interpolated_matrix(self):
         # def getNewMatrixSize(matrix):
@@ -243,5 +227,5 @@ class PreparedSignal:
             "initial_moments_fourth_order": to_data_points(initialMomentsFourthOrder),
             "central_moment_functions_fourth_order": to_data_points(centralMomentFunctionsFourthOrder),
             "variance": to_data_points(variance),
-            "rhythm": stats_matrix_to_points(self.time_peaks_rhythm),
+            "rhythm": self.rhythm_points,
         }

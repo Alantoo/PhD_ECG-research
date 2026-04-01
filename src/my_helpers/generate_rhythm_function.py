@@ -7,6 +7,7 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 import scipy.interpolate as interp
+import wfdb.processing
 
 
 class Point:
@@ -50,11 +51,13 @@ class GenerateRhythmFunction(ReadDataFile):
 
     def get_ecg_dataframe(self, sig_name_idx):
         signal = self.signals[sig_name_idx]
-        _, rpeaks = nk.ecg_peaks(signal, sampling_rate=self.sampling_rate)
-        _, waves = nk.ecg_delineate(signal, rpeaks, sampling_rate=self.sampling_rate)
+        cleaned = nk.ecg_clean(signal, sampling_rate=self.sampling_rate)
+        r_indices = wfdb.processing.xqrs_detect(np.array(cleaned, dtype=float), fs=self.sampling_rate, verbose=False)
+        rpeaks = {"ECG_R_Peaks": r_indices}
+        _, waves = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate)
         ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate, 4))
         ECG_Q_Peaks = list(np.round(np.array(waves["ECG_Q_Peaks"]) / self.sampling_rate, 4))
-        ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate, 4))
+        ECG_R_Peaks = list(np.round(np.array(r_indices) / self.sampling_rate, 4))
         ECG_S_Peaks = list(np.round(np.array(waves["ECG_S_Peaks"]) / self.sampling_rate, 4))
         ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate, 4))
 
@@ -98,50 +101,25 @@ class GenerateRhythmFunction(ReadDataFile):
 
         ecg_fr = self.get_ecg_dataframe(sig_name_idx)
 
-        ecg_t_peaks = ecg_fr["ECG_T_Peaks"]
-        ecg_p_peaks = ecg_fr["ECG_P_Peaks"]
-        ecg_r_peaks = ecg_fr["ECG_R_Peaks"]
-        ecg_s_peaks = []
-        ecg_q_peaks = []
+        def to_valid(series):
+            return [float(v) for v in series if not np.isnan(float(v))]
 
-        q_s_exist = ("ECG_Q_Peaks" in ecg_fr and "ECG_S_Peaks" in ecg_fr)
+        peak_series = [
+            to_valid(ecg_fr["ECG_R_Peaks"]),
+            to_valid(ecg_fr["ECG_P_Peaks"]),
+            to_valid(ecg_fr["ECG_T_Peaks"]),
+            to_valid(ecg_fr["ECG_Q_Peaks"]),
+            to_valid(ecg_fr["ECG_S_Peaks"]),
+        ]
+        n_intervals = min(len(p) for p in peak_series) - 1
 
-        if q_s_exist:
-            ecg_q_peaks = ecg_fr["ECG_Q_Peaks"]
-            ecg_s_peaks = ecg_fr["ECG_S_Peaks"]
-
-        T1_ECG_T_Peaks = []
-        for i in range(len(ecg_t_peaks) - 1):
-            T1_ECG_T_Peaks.append(round(ecg_t_peaks[i + 1] - ecg_t_peaks[i], 2))
-
-        T1_ECG_P_Peaks = []
-        for i in range(len(ecg_p_peaks) - 1):
-            T1_ECG_P_Peaks.append(round(ecg_p_peaks[i + 1] - ecg_p_peaks[i], 2))
-
-        T1_ECG_R_Peaks = []
-        for i in range(len(ecg_r_peaks) - 1):
-            T1_ECG_R_Peaks.append(round(ecg_r_peaks[i + 1] - ecg_r_peaks[i], 2))
-
-        T1_ECG_S_Peaks = []
-        T1_ECG_Q_Peaks = []
-        if q_s_exist:
-            for i in range(len(ecg_s_peaks) - 1):
-                T1_ECG_S_Peaks.append(round(ecg_s_peaks[i + 1] - ecg_s_peaks[i], 2))
-
-            for i in range(len(ecg_q_peaks) - 1):
-                T1_ECG_Q_Peaks.append(round(ecg_q_peaks[i + 1] - ecg_q_peaks[i], 2))
-
-        points = list()
-        for i in range(len(ecg_p_peaks) - 1):
-            points.append([ecg_p_peaks[i], T1_ECG_P_Peaks[i]])
-            points.append([ecg_r_peaks[i], T1_ECG_R_Peaks[i]])
-            if q_s_exist:
-                points.append([ecg_q_peaks[i], T1_ECG_Q_Peaks[i]])
-                points.append([ecg_s_peaks[i], T1_ECG_S_Peaks[i]])
-
-            points.append([ecg_t_peaks[i], T1_ECG_T_Peaks[i]])
-
-        return points
+        result = []
+        beat_idx = 1
+        for i in range(n_intervals):
+            for peaks in peak_series:
+                result.append([beat_idx, round(peaks[i + 1] - peaks[i], 4)])
+                beat_idx += 1
+        return result
 
     def genIntervals(self):
         logger.info("Gen All ECG Intervals")

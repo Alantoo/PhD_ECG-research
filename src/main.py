@@ -2,6 +2,9 @@ import glob
 import os
 from pathlib import Path
 
+import wfdb
+import wfdb.processing
+
 import dotenv
 import numpy as np
 import simplejson as json
@@ -18,6 +21,7 @@ from get_config.ecg_config import ECGConfig
 from my_helpers.data_preparation import DataPreparation
 from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.mathematical_statistics import MathematicalStatistics
+from my_helpers.artifact_detection import detect_artifacts
 from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.read_data.read_data_file import ReadDataFile
 from pipeline import butter_bandpass, apply_detrend, \
@@ -156,7 +160,8 @@ def v2_get_databases():
                 }
 
                 # NOTICE: currently ECG signals supported only
-                if item['name'] != 'ecg':
+                # Exception: brno-university-of-technology-ecg-signal-database exposes non-ecg-named channels
+                if item['name'] != 'ecg' and not db_id.startswith('brno-university-of-technology-ecg-signal-database'):
                     continue
 
                 signals.append(item)
@@ -338,6 +343,7 @@ def get_rhythm(database, datafile, signal):
     rhythm = GenerateRhythmFunction(cfg)
     data = rhythm.get_rhythm_points(signal)
     rhythm_cache[key] = data
+    math_cache.pop(key, None)
     json_data = json.dumps(data, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
@@ -393,6 +399,143 @@ def classify():
     json_data = json.dumps({
         "class": result,
     }, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+
+@app.post('/rhythm')
+def compute_rhythm_endpoint():
+    raw_signal = request.get_json()
+
+    input_signal = raw_signal
+    if len(raw_signal) > 2 and len(raw_signal[0]) == 2:
+        input_signal = np.transpose(raw_signal).tolist()[1]
+
+    sampling_rate = 500
+    prepared = PreparedSignal(input_signal, sampling_rate)
+
+    def to_valid(peaks):
+        return [float(v) for v in peaks if not np.isnan(float(v))]
+
+    peak_series = [
+        to_valid(prepared.ECG_R_Peaks),
+        to_valid(prepared.ECG_P_Peaks),
+        to_valid(prepared.ECG_T_Peaks),
+        to_valid(prepared.ECG_Q_Peaks),
+        to_valid(prepared.ECG_S_Peaks),
+    ]
+    n_intervals = min(len(p) for p in peak_series) - 1
+
+    result = []
+    beat_idx = 1
+    for i in range(n_intervals):
+        for peaks in peak_series:
+            result.append([beat_idx, round(peaks[i + 1] - peaks[i], 4)])
+            beat_idx += 1
+
+    json_data = json.dumps(result, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+
+@app.post('/detect-segments')
+def detect_segments_endpoint():
+    raw_signal = request.get_json()
+
+    input_signal = raw_signal
+    if len(raw_signal) > 2 and len(raw_signal[0]) == 2:
+        input_signal = np.transpose(raw_signal).tolist()[1]
+
+    sampling_rate = 500
+    prepared = PreparedSignal(input_signal, sampling_rate)
+
+    def peaks_to_list(series):
+        return [None if np.isnan(v) else round(float(v), 4) for v in series]
+
+    result = {
+        "r_peaks": peaks_to_list(prepared.ECG_R_Peaks),
+        "p_peaks": peaks_to_list(prepared.ECG_P_Peaks),
+        "t_peaks": peaks_to_list(prepared.ECG_T_Peaks),
+        "q_peaks": peaks_to_list(prepared.ECG_Q_Peaks),
+        "s_peaks": peaks_to_list(prepared.ECG_S_Peaks),
+    }
+
+    json_data = json.dumps(result, ignore_nan=True)
+    return Response(json_data, mimetype='application/json')
+
+
+@app.get('/databases/<string:database>/data/<string:datafile>/signals/<int:signal>/segments')
+def get_signal_segments(database, datafile, signal):
+    cfg = new_cfg(database, datafile, signal)
+    record_path = cfg.getFileName()
+    sampling_rate = 500
+
+    def peaks_to_list(indices, sr):
+        return [round(float(i) / sr, 4) for i in indices]
+
+    # Try WFDB annotations first (many PhysioNet records ship with .atr files)
+    ann_extensions = ['atr', 'qrs', 'beat']
+    for ext in ann_extensions:
+        ann_path = record_path + '.' + ext
+        if Path(ann_path).exists():
+            try:
+                ann = wfdb.rdann(record_path, ext)
+                r_indices = ann.sample[np.isin(ann.symbol, ['N', 'L', 'R', 'B', 'A', 'a', 'J', 'S', 'V', 'r', 'F', 'e', 'j', 'n', 'E', '/', 'f', 'Q'])]
+                result = {
+                    "r_peaks": peaks_to_list(r_indices, ann.fs or sampling_rate),
+                    "p_peaks": [],
+                    "t_peaks": [],
+                    "q_peaks": [],
+                    "s_peaks": [],
+                    "source": "wfdb_annotation",
+                }
+                return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
+            except Exception:
+                pass
+
+    # Fall back to algorithmic detection on the cleaned signal
+    df = ReadDataFile(cfg)
+    raw = np.array(df.signals[signal])
+    import neurokit2 as nk
+    cleaned = nk.ecg_clean(raw, sampling_rate=sampling_rate)
+    r_indices = wfdb.processing.xqrs_detect(cleaned, fs=sampling_rate, verbose=False)
+    _, waves = nk.ecg_delineate(cleaned, {"ECG_R_Peaks": r_indices}, sampling_rate=sampling_rate)
+
+    def wave_to_list(key):
+        arr = np.array(waves.get(key, []), dtype=float)
+        return [None if np.isnan(v) else round(float(v) / sampling_rate, 4) for v in arr]
+
+    result = {
+        "r_peaks": peaks_to_list(r_indices, sampling_rate),
+        "p_peaks": wave_to_list("ECG_P_Peaks"),
+        "t_peaks": wave_to_list("ECG_T_Peaks"),
+        "q_peaks": wave_to_list("ECG_Q_Peaks"),
+        "s_peaks": wave_to_list("ECG_S_Peaks"),
+        "source": "xqrs",
+    }
+    return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
+
+
+@app.post('/detect-artifacts')
+def detect_artifacts_endpoint():
+    raw_signal = request.get_json()
+
+    input_signal = raw_signal
+    if len(raw_signal) > 2 and len(raw_signal[0]) == 2:
+        input_signal = np.transpose(raw_signal).tolist()[1]
+
+    sampling_rate = 500
+    prepared = PreparedSignal(input_signal, sampling_rate)
+
+    r_peak_indices = prepared.rpeaks["ECG_R_Peaks"]
+    r_peaks_sec = (np.array(r_peak_indices) / sampling_rate).tolist()
+    r_amplitudes = [float(input_signal[int(idx)]) for idx in r_peak_indices]
+
+    result = detect_artifacts(
+        r_peaks_sec,
+        r_amplitudes,
+        [prepared.matrix_P_R, prepared.matrix_R_T, prepared.matrix_T_P],
+    )
+
+    json_data = json.dumps(result, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
 
