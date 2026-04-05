@@ -15,32 +15,44 @@ class PreparedSignal:
         r_indices = wfdb.processing.xqrs_detect(np.array(cleaned, dtype=float), fs=self.sampling_rate, verbose=False)
         rpeaks = {"ECG_R_Peaks": r_indices}
         _, waves = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate)
-        ECG_P_Peaks = list(np.round(np.array(waves["ECG_P_Peaks"]) / self.sampling_rate, 4))
-        ECG_Q_Peaks = list(np.round(np.array(waves["ECG_Q_Peaks"]) / self.sampling_rate, 4))
-        ECG_R_Peaks = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate, 4))
-        ECG_S_Peaks = list(np.round(np.array(waves["ECG_S_Peaks"]) / self.sampling_rate, 4))
-        ECG_T_Peaks = list(np.round(np.array(waves["ECG_T_Peaks"]) / self.sampling_rate, 4))
+        def to_sec(key):
+            return list(np.round(np.array(waves[key]) / self.sampling_rate, 4))
 
-        ecg_fr = pd.DataFrame({"ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks, "ECG_R_Peaks": ECG_R_Peaks,
-                               "ECG_S_Peaks": ECG_S_Peaks, "ECG_T_Peaks": ECG_T_Peaks})
+        ECG_P_Peaks    = to_sec("ECG_P_Peaks")
+        ECG_Q_Peaks    = to_sec("ECG_Q_Peaks")
+        ECG_R_Peaks    = list(np.round(np.array(rpeaks["ECG_R_Peaks"]) / self.sampling_rate, 4))
+        ECG_S_Peaks    = to_sec("ECG_S_Peaks")
+        ECG_T_Peaks    = to_sec("ECG_T_Peaks")
+        ECG_P_Onsets   = to_sec("ECG_P_Onsets")
+        ECG_P_Offsets  = to_sec("ECG_P_Offsets")
+        ECG_T_Onsets   = to_sec("ECG_T_Onsets")
+        ECG_T_Offsets  = to_sec("ECG_T_Offsets")
+
+        ecg_fr = pd.DataFrame({
+            "ECG_P_Peaks": ECG_P_Peaks, "ECG_Q_Peaks": ECG_Q_Peaks,
+            "ECG_R_Peaks": ECG_R_Peaks, "ECG_S_Peaks": ECG_S_Peaks,
+            "ECG_T_Peaks": ECG_T_Peaks,
+            "ECG_P_Onsets": ECG_P_Onsets, "ECG_P_Offsets": ECG_P_Offsets,
+            "ECG_T_Onsets": ECG_T_Onsets, "ECG_T_Offsets": ECG_T_Offsets,
+        })
         self.rpeaks = rpeaks
         self.waves = waves
         self.ecg_fr = ecg_fr
-        self.ECG_P_Peaks = ecg_fr["ECG_P_Peaks"]
-        self.ECG_Q_Peaks = ecg_fr["ECG_Q_Peaks"]
-        self.ECG_R_Peaks = ecg_fr["ECG_R_Peaks"]
-        self.ECG_S_Peaks = ecg_fr["ECG_S_Peaks"]
-        self.ECG_T_Peaks = ecg_fr["ECG_T_Peaks"]
+        self.ECG_P_Peaks   = ecg_fr["ECG_P_Peaks"]
+        self.ECG_Q_Peaks   = ecg_fr["ECG_Q_Peaks"]
+        self.ECG_R_Peaks   = ecg_fr["ECG_R_Peaks"]
+        self.ECG_S_Peaks   = ecg_fr["ECG_S_Peaks"]
+        self.ECG_T_Peaks   = ecg_fr["ECG_T_Peaks"]
+        self.ECG_P_Onsets  = ecg_fr["ECG_P_Onsets"]
+        self.ECG_P_Offsets = ecg_fr["ECG_P_Offsets"]
+        self.ECG_T_Onsets  = ecg_fr["ECG_T_Onsets"]
+        self.ECG_T_Offsets = ecg_fr["ECG_T_Offsets"]
 
         self.Q_S_exist = ("ECG_Q_Peaks" in ecg_fr and "ECG_S_Peaks" in ecg_fr)
 
         if self.Q_S_exist:
             self.ECG_Q_Peaks = self.ecg_fr["ECG_Q_Peaks"]
             self.ECG_S_Peaks = self.ecg_fr["ECG_S_Peaks"]
-
-        matrix_P_R = []
-        matrix_R_T = []
-        matrix_T_P = []
 
         def to_valid(peaks):
             return [float(v) for v in peaks if not np.isnan(float(v))]
@@ -62,109 +74,48 @@ class PreparedSignal:
                 beat_idx += 1
         self.rhythm_points = rhythm_points
 
-        for i in range(len(self.ECG_P_Peaks) - 1):
-            def replaceNaN(val):
-                if np.isnan(val):
-                    return 0
-                return val
+        sig_arr = np.array(self.signal)
 
-            def appendIfNotNaN(segA, segB, lst):
+        def extract(on_sec, off_sec):
+            s = int(float(on_sec) * self.sampling_rate)
+            e = int(float(off_sec) * self.sampling_rate)
+            return sig_arr[s:e] if e > s else None
 
-                start = int(replace_nan(segA[i]) * self.sampling_rate)
-                end = int(replace_nan(segB[i]) * self.sampling_rate)
-
-                sig_name = self.ecg_config.getSigName()
-                sig = self.signals[sig_name]
-                item = sig[start:end]
-                lst.append(item)
-
-            def slice(matrixLeft, matrixRight, rate, i):
-                start = int(replaceNaN(matrixLeft[i]) * rate)
-
-                end = int(replaceNaN(matrixRight[i]) * rate)
-                return self.signal[start:end]
-
-            # appendIfNotNaN(self.ECG_P_Peaks, self.ECG_R_Peaks, matrix_P_R)
-            # appendIfNotNaN(self.ECG_R_Peaks, self.ECG_T_Peaks, matrix_R_T)
-            # appendIfNotNaN(self.ECG_T_Peaks, self.ECG_P_Peaks, matrix_T_P)
-            start = int(replaceNaN(self.ECG_P_Peaks[i]) * self.sampling_rate)
-            end = int(replaceNaN(self.ECG_R_Peaks[i]) * self.sampling_rate)
-
-            pr = self.signal[start:end]  # slice(self.ECG_P_Peaks, self.ECG_R_Peaks, self.sampling_rate)
-            start = int(replaceNaN(self.ECG_R_Peaks[i]) * self.sampling_rate)
-            end = int(replaceNaN(self.ECG_T_Peaks[i]) * self.sampling_rate)
-            rt = self.signal[start:end]
-            start = int(replaceNaN(self.ECG_T_Peaks[i]) * self.sampling_rate)
-            end = int(replaceNaN(self.ECG_P_Peaks[i + 1]) * self.sampling_rate)
-            tp = self.signal[start:end]
-
-            if len(pr) == 0 or len(rt) == 0 or len(tp) == 0:
+        matrix_P_wave, matrix_QRS, matrix_T_wave, matrix_beat = [], [], [], []
+        for i in range(len(self.ECG_P_Onsets)):
+            p_on  = float(self.ECG_P_Onsets.iloc[i])
+            p_off = float(self.ECG_P_Offsets.iloc[i])
+            q     = float(self.ECG_Q_Peaks.iloc[i])
+            s     = float(self.ECG_S_Peaks.iloc[i])
+            t_on  = float(self.ECG_T_Onsets.iloc[i])
+            t_off = float(self.ECG_T_Offsets.iloc[i])
+            if any(np.isnan(v) for v in [p_on, p_off, q, s, t_on, t_off]):
                 continue
+            pw   = extract(p_on, p_off)
+            qrs  = extract(q, s)
+            tw   = extract(t_on, t_off)
+            beat = extract(p_on, t_off)
+            if any(x is None for x in [pw, qrs, tw, beat]):
+                continue
+            if len(pw) < 2 or len(qrs) < 2 or len(tw) < 2 or len(beat) < 4:
+                continue
+            matrix_P_wave.append(pw)
+            matrix_QRS.append(qrs)
+            matrix_T_wave.append(tw)
+            matrix_beat.append(beat)
 
-            matrix_P_R.append(pr)
-            matrix_R_T.append(rt)
-            matrix_T_P.append(tp)
-
-        self.matrix_T_P = matrix_T_P
-        self.matrix_P_R = matrix_P_R
-        self.matrix_R_T = matrix_R_T
+        self.matrix_P_wave = matrix_P_wave
+        self.matrix_QRS    = matrix_QRS
+        self.matrix_T_wave = matrix_T_wave
+        self.matrix_beat   = matrix_beat
 
     def get_interpolated_matrix(self):
-        # def getNewMatrixSize(matrix):
-        #     n = 0
-        #     for i in range(len(matrix)):
-        #         n = n + len(matrix[i])
-        #     n = int((n / len(matrix)) * self.multiplier)
-        #     n = int(len(matrix[0]) * self.multiplier)
-        #     return n
-        #
-        # matrix_T_P_size = getNewMatrixSize(self.matrix_T_P)
-        # matrix_P_R_size = getNewMatrixSize(self.matrix_P_R)
-        # matrix_R_T_size = getNewMatrixSize(self.matrix_R_T)
-
-        # print(matrix_T_P_size)
-        # print(matrix_P_R_size)
-        # print(matrix_R_T_size)
-
-        matrix_T_P_size = 145
-        matrix_P_R_size = 48
-        matrix_R_T_size = 83
-
-        interp_matrix_T_P = []
-        interp_matrix_P_R = []
-        interp_matrix_R_T = []
-
-        for i in range(len(self.matrix_T_P)):
-            arr = np.array(self.matrix_T_P[i])
-            arr_interp = interp.interp1d(np.arange(arr.size), arr)
-            arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_T_P_size))
-            interp_matrix_T_P.append(arr_stretch)
-
-        for i in range(len(self.matrix_P_R)):
-            arr = np.array(self.matrix_P_R[i])
-            arr_interp = interp.interp1d(np.arange(arr.size), arr)
-            arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_P_R_size))
-            interp_matrix_P_R.append(arr_stretch)
-
-        for i in range(len(self.matrix_R_T)):
-            arr = np.array(self.matrix_R_T[i])
-            arr_interp = interp.interp1d(np.arange(arr.size), arr)
-            arr_stretch = arr_interp(np.linspace(0, arr.size - 1, matrix_R_T_size))
-            interp_matrix_R_T.append(arr_stretch)
-
-        interp_matrix_all = np.concatenate((interp_matrix_P_R, interp_matrix_R_T, interp_matrix_T_P), axis=1)
-
-        # self.interp_matrix_all = interp_matrix_all
-
-
         mod_sampling_rate = int(self.sampling_rate * self.multiplier)
         interp_matrix = []
-        for i in range(len(interp_matrix_all)):
-            arr = np.array(interp_matrix_all[i])
-            arr_interp = interp.interp1d(np.arange(arr.size), arr)
-            arr_stretch = arr_interp(np.linspace(0, arr.size - 1, mod_sampling_rate))
-            interp_matrix.append(arr_stretch.tolist())
-
+        for beat in self.matrix_beat:
+            arr = np.array(beat, dtype=float)
+            f = interp.interp1d(np.arange(arr.size), arr)
+            interp_matrix.append(f(np.linspace(0, arr.size - 1, mod_sampling_rate)).tolist())
         return interp_matrix, mod_sampling_rate
 
     def get_stats(self):

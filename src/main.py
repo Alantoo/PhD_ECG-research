@@ -447,15 +447,23 @@ def detect_segments_endpoint():
     sampling_rate = 500
     prepared = PreparedSignal(input_signal, sampling_rate)
 
+    def to_val(v):
+        return None if np.isnan(float(v)) else round(float(v), 4)
+
     def peaks_to_list(series):
-        return [None if np.isnan(v) else round(float(v), 4) for v in series]
+        return [to_val(v) for v in series]
+
+    def wave_ranges(onsets, offsets):
+        return [
+            [to_val(on), to_val(off)]
+            for on, off in zip(onsets, offsets)
+        ]
 
     result = {
-        "r_peaks": peaks_to_list(prepared.ECG_R_Peaks),
-        "p_peaks": peaks_to_list(prepared.ECG_P_Peaks),
-        "t_peaks": peaks_to_list(prepared.ECG_T_Peaks),
-        "q_peaks": peaks_to_list(prepared.ECG_Q_Peaks),
-        "s_peaks": peaks_to_list(prepared.ECG_S_Peaks),
+        "r_peaks":   peaks_to_list(prepared.ECG_R_Peaks),
+        "p_waves":   wave_ranges(prepared.ECG_P_Onsets, prepared.ECG_P_Offsets),
+        "qrs_waves": wave_ranges(prepared.ECG_Q_Peaks,  prepared.ECG_S_Peaks),
+        "t_waves":   wave_ranges(prepared.ECG_T_Onsets, prepared.ECG_T_Offsets),
     }
 
     json_data = json.dumps(result, ignore_nan=True)
@@ -532,7 +540,7 @@ def detect_artifacts_endpoint():
     result = detect_artifacts(
         r_peaks_sec,
         r_amplitudes,
-        [prepared.matrix_P_R, prepared.matrix_R_T, prepared.matrix_T_P],
+        [prepared.matrix_P_wave, prepared.matrix_QRS, prepared.matrix_T_wave],
     )
 
     json_data = json.dumps(result, ignore_nan=True)
