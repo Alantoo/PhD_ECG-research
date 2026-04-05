@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class PreparedSignal:
-    def __init__(self, signal, sampling_rate):
+    def __init__(self, signal, sampling_rate, delineation_method='dwt'):
         self.sampling_rate = sampling_rate
         self.signal = signal
         self.multiplier = 1
@@ -17,9 +17,56 @@ class PreparedSignal:
         cleaned = nk.ecg_clean(signal, sampling_rate=self.sampling_rate)
         r_indices = wfdb.processing.xqrs_detect(np.array(cleaned, dtype=float), fs=self.sampling_rate, verbose=False)
         rpeaks = {"ECG_R_Peaks": r_indices}
-        _, waves = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate)
+        n_beats = len(rpeaks["ECG_R_Peaks"])
+
+        def _delineate(method):
+            _, w = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate, method=method)
+            return w
+
+        def _align(waves, key):
+            raw = waves.get(key, [])
+            arr = np.array(raw, dtype=float)
+            if len(arr) < n_beats:
+                arr = np.concatenate([arr, np.full(n_beats - len(arr), np.nan)])
+            elif len(arr) > n_beats:
+                arr = arr[:n_beats]
+            return arr
+
+        def _merge_waves(waves_a, waves_b, keys):
+            """For each key, merge two arrays: use non-NaN value; if both valid, average."""
+            merged = {}
+            for key in keys:
+                a = _align(waves_a, key)
+                b = _align(waves_b, key)
+                both = ~np.isnan(a) & ~np.isnan(b)
+                only_a = ~np.isnan(a) & np.isnan(b)
+                only_b = np.isnan(a) & ~np.isnan(b)
+                result = np.full(n_beats, np.nan)
+                result[both]  = np.round((a[both] + b[both]) / 2)
+                result[only_a] = a[only_a]
+                result[only_b] = b[only_b]
+                merged[key] = result
+            return merged
+
+        wave_keys = ["ECG_P_Peaks", "ECG_Q_Peaks", "ECG_S_Peaks", "ECG_T_Peaks",
+                     "ECG_P_Onsets", "ECG_P_Offsets", "ECG_T_Onsets", "ECG_T_Offsets"]
+
+        if delineation_method == 'merged':
+            waves_dwt = _delineate('dwt')
+            waves_cwt = _delineate('cwt')
+            merged = _merge_waves(waves_dwt, waves_cwt, wave_keys)
+            waves = {k: merged[k].tolist() for k in wave_keys}
+        else:
+            _, waves = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate, method=delineation_method)
+
         def to_sec(key):
-            return list(np.round(np.array(waves[key]) / self.sampling_rate, 4))
+            raw = waves.get(key, [])
+            arr = np.array(raw, dtype=float)
+            if len(arr) < n_beats:
+                arr = np.concatenate([arr, np.full(n_beats - len(arr), np.nan)])
+            elif len(arr) > n_beats:
+                arr = arr[:n_beats]
+            return list(np.where(np.isnan(arr), np.nan, np.round(arr / self.sampling_rate, 4)))
 
         ECG_P_Peaks    = to_sec("ECG_P_Peaks")
         ECG_Q_Peaks    = to_sec("ECG_Q_Peaks")
@@ -91,6 +138,10 @@ class PreparedSignal:
                     intervals.append((i + 1, round(t1 - t0, 4)))
             zone_intervals[key] = intervals
         self.zone_intervals = zone_intervals
+        self.zone_peak_times: dict[str, dict[int, float]] = {
+            key: {i: t for i, t in lk.items() if t is not None}
+            for key, lk in zip(zone_keys, zone_lookups)
+        }
 
         sig_arr = np.array(self.signal)
 
