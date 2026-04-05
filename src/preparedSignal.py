@@ -1,8 +1,11 @@
+import logging
 import numpy as np
 import neurokit2 as nk
 import pandas as pd
 import scipy.interpolate as interp
 import wfdb.processing
+
+logger = logging.getLogger(__name__)
 
 
 class PreparedSignal:
@@ -54,25 +57,40 @@ class PreparedSignal:
             self.ECG_Q_Peaks = self.ecg_fr["ECG_Q_Peaks"]
             self.ECG_S_Peaks = self.ecg_fr["ECG_S_Peaks"]
 
-        def to_valid(peaks):
-            return [float(v) for v in peaks if not np.isnan(float(v))]
+        def make_lookup(series):
+            return {i: float(v) if not np.isnan(float(v)) else None for i, v in enumerate(series)}
 
-        peak_series = [
-            to_valid(ECG_R_Peaks),
-            to_valid(ECG_P_Peaks),
-            to_valid(ECG_T_Peaks),
-            to_valid(ECG_Q_Peaks),
-            to_valid(ECG_S_Peaks),
-        ]
-        n_intervals = min(len(p) for p in peak_series) - 1
+        zone_keys = ["ECG_R_Peaks", "ECG_P_Peaks", "ECG_T_Peaks", "ECG_Q_Peaks", "ECG_S_Peaks"]
+        zone_raw   = [ECG_R_Peaks, ECG_P_Peaks, ECG_T_Peaks, ECG_Q_Peaks, ECG_S_Peaks]
+        zone_lookups = [make_lookup(s) for s in zone_raw]
+        n_beats = len(ECG_R_Peaks)
 
+        # rhythm_points: interleaved per-zone intervals, only where BOTH consecutive
+        # beats have all 5 peaks valid (keeps alignment for modelling/stats)
         rhythm_points = []
         beat_idx = 1
-        for i in range(n_intervals):
-            for peaks in peak_series:
-                rhythm_points.append([beat_idx, round(peaks[i + 1] - peaks[i], 4)])
+        for i in range(n_beats - 1):
+            vals_i  = [lk.get(i)     for lk in zone_lookups]
+            vals_i1 = [lk.get(i + 1) for lk in zone_lookups]
+            if any(v is None for v in vals_i + vals_i1):
+                continue
+            for v0, v1 in zip(vals_i, vals_i1):
+                rhythm_points.append([beat_idx, round(v1 - v0, 4)])
                 beat_idx += 1
-        self.rhythm_points = rhythm_points
+        self.rhythm_points = [[round(x / 6, 6), y] for x, y in rhythm_points]
+
+        # zone_intervals: per-zone independent intervals, consecutive beats only,
+        # NaN in one zone does NOT affect other zones
+        zone_intervals: dict[str, list[tuple[int, float]]] = {}
+        for key, lk in zip(zone_keys, zone_lookups):
+            intervals = []
+            for i in range(n_beats - 1):
+                t0 = lk.get(i)
+                t1 = lk.get(i + 1)
+                if t0 is not None and t1 is not None:
+                    intervals.append((i + 1, round(t1 - t0, 4)))
+            zone_intervals[key] = intervals
+        self.zone_intervals = zone_intervals
 
         sig_arr = np.array(self.signal)
 
@@ -82,6 +100,8 @@ class PreparedSignal:
             return sig_arr[s:e] if e > s else None
 
         matrix_P_wave, matrix_QRS, matrix_T_wave, matrix_beat = [], [], [], []
+        skipped_nan = 0
+        skipped_too_short = 0
         for i in range(len(self.ECG_P_Onsets)):
             p_on  = float(self.ECG_P_Onsets.iloc[i])
             p_off = float(self.ECG_P_Offsets.iloc[i])
@@ -89,15 +109,27 @@ class PreparedSignal:
             s     = float(self.ECG_S_Peaks.iloc[i])
             t_on  = float(self.ECG_T_Onsets.iloc[i])
             t_off = float(self.ECG_T_Offsets.iloc[i])
-            if any(np.isnan(v) for v in [p_on, p_off, q, s, t_on, t_off]):
+            named = {'p_on': p_on, 'p_off': p_off, 'q': q, 's': s, 't_on': t_on, 't_off': t_off}
+            missing = [name for name, v in named.items() if np.isnan(v)]
+            if missing:
+                skipped_nan += 1
+                logger.warning(
+                    "Beat #%d skipped (NaN fiducial point(s): %s) | %s",
+                    i, ', '.join(missing),
+                    '  '.join(f"{k}={v:.4f}" if not np.isnan(v) else f"{k}=NaN" for k, v in named.items()),
+                )
                 continue
             pw   = extract(p_on, p_off)
             qrs  = extract(q, s)
             tw   = extract(t_on, t_off)
             beat = extract(p_on, t_off)
             if any(x is None for x in [pw, qrs, tw, beat]):
+                skipped_too_short += 1
+                logger.warning("Beat #%d skipped (empty segment slice) | p_on=%.4f p_off=%.4f q=%.4f s=%.4f t_on=%.4f t_off=%.4f", i, p_on, p_off, q, s, t_on, t_off)
                 continue
             if len(pw) < 2 or len(qrs) < 2 or len(tw) < 2 or len(beat) < 4:
+                skipped_too_short += 1
+                logger.warning("Beat #%d skipped (segment too short: pw=%d qrs=%d tw=%d beat=%d samples) | p_on=%.4f t_off=%.4f", i, len(pw), len(qrs), len(tw), len(beat), p_on, t_off)
                 continue
             matrix_P_wave.append(pw)
             matrix_QRS.append(qrs)
@@ -108,6 +140,13 @@ class PreparedSignal:
         self.matrix_QRS    = matrix_QRS
         self.matrix_T_wave = matrix_T_wave
         self.matrix_beat   = matrix_beat
+
+        total = len(self.ECG_P_Onsets)
+        kept  = len(matrix_beat)
+        logger.info(
+            "PreparedSignal: %d/%d beats kept  (skipped: %d NaN fiducials, %d too-short segments)",
+            kept, total, skipped_nan, skipped_too_short,
+        )
 
     def get_interpolated_matrix(self):
         mod_sampling_rate = int(self.sampling_rate * self.multiplier)

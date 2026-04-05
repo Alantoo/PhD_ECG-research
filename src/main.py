@@ -21,7 +21,7 @@ from get_config.ecg_config import ECGConfig
 from my_helpers.data_preparation import DataPreparation
 from my_helpers.generate_rhythm_function import GenerateRhythmFunction
 from my_helpers.mathematical_statistics import MathematicalStatistics
-from my_helpers.artifact_detection import detect_artifacts
+from my_helpers.artifact_detection import detect_artifacts, detect_by_zone_intervals, mad_stats
 from my_helpers.plot_statistics import PlotStatistics
 from my_helpers.read_data.read_data_file import ReadDataFile
 from pipeline import butter_bandpass, apply_detrend, \
@@ -432,6 +432,8 @@ def compute_rhythm_endpoint():
             result.append([beat_idx, round(peaks[i + 1] - peaks[i], 4)])
             beat_idx += 1
 
+    result = [[round(x / 6, 6), y] for x, y in result]
+
     json_data = json.dumps(result, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
@@ -450,20 +452,34 @@ def detect_segments_endpoint():
     def to_val(v):
         return None if np.isnan(float(v)) else round(float(v), 4)
 
-    def peaks_to_list(series):
-        return [to_val(v) for v in series]
+    beats = []
+    skipped_count = 0
+    for i in range(len(prepared.ECG_R_Peaks)):
+        p_on  = to_val(prepared.ECG_P_Onsets.iloc[i])
+        p_off = to_val(prepared.ECG_P_Offsets.iloc[i])
+        q     = to_val(prepared.ECG_Q_Peaks.iloc[i])
+        r     = to_val(prepared.ECG_R_Peaks.iloc[i])
+        s     = to_val(prepared.ECG_S_Peaks.iloc[i])
+        t_on  = to_val(prepared.ECG_T_Onsets.iloc[i])
+        t_off = to_val(prepared.ECG_T_Offsets.iloc[i])
 
-    def wave_ranges(onsets, offsets):
-        return [
-            [to_val(on), to_val(off)]
-            for on, off in zip(onsets, offsets)
-        ]
+        missing = [name for name, val in {"p_on": p_on, "p_off": p_off, "q": q, "r": r, "s": s, "t_on": t_on, "t_off": t_off}.items() if val is None]
+        skipped = len(missing) > 0
+        if skipped:
+            skipped_count += 1
+
+        beats.append({
+            "p_on": p_on, "p_off": p_off,
+            "q": q, "r": r, "s": s,
+            "t_on": t_on, "t_off": t_off,
+            "skipped": skipped,
+        })
+
+    app.logger.info(f"Segment detection complete — {len(beats)} beats, {skipped_count} skipped")
 
     result = {
-        "r_peaks":   peaks_to_list(prepared.ECG_R_Peaks),
-        "p_waves":   wave_ranges(prepared.ECG_P_Onsets, prepared.ECG_P_Offsets),
-        "qrs_waves": wave_ranges(prepared.ECG_Q_Peaks,  prepared.ECG_S_Peaks),
-        "t_waves":   wave_ranges(prepared.ECG_T_Onsets, prepared.ECG_T_Offsets),
+        "beats": beats,
+        "r_peaks": [to_val(prepared.ECG_R_Peaks.iloc[i]) for i in range(len(prepared.ECG_R_Peaks))],
     }
 
     json_data = json.dumps(result, ignore_nan=True)
@@ -522,6 +538,30 @@ def get_signal_segments(database, datafile, signal):
     return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
 
 
+def _extract_signal(raw):
+    if isinstance(raw, dict):
+        signal_data = raw.get('signal', raw)
+    else:
+        signal_data = raw
+    if len(signal_data) > 2 and len(signal_data[0]) == 2:
+        return np.transpose(signal_data).tolist()[1]
+    return signal_data
+
+
+def _type_result(flags, r_peaks_arr, n_beats):
+    time_ranges = []
+    for idx in flags:
+        start = float(r_peaks_arr[idx - 1]) if idx > 0 else 0.0
+        end = float(r_peaks_arr[idx + 1]) if idx < n_beats - 1 else float(r_peaks_arr[-1])
+        time_ranges.append([start, end])
+    return {
+        "flags": flags,
+        "artifact_time_ranges": time_ranges,
+        "total_beats": n_beats,
+        "artifact_ratio": round(len(flags) / n_beats, 4) if n_beats > 0 else 0.0,
+    }
+
+
 @app.post('/detect-artifacts')
 def detect_artifacts_endpoint():
     raw_signal = request.get_json()
@@ -537,14 +577,218 @@ def detect_artifacts_endpoint():
     r_peaks_sec = (np.array(r_peak_indices) / sampling_rate).tolist()
     r_amplitudes = [float(input_signal[int(idx)]) for idx in r_peak_indices]
 
-    result = detect_artifacts(
+    segment_result = detect_artifacts(
         r_peaks_sec,
         r_amplitudes,
         [prepared.matrix_P_wave, prepared.matrix_QRS, prepared.matrix_T_wave],
     )
 
+    zone_per_zone, zone_flagged = detect_by_zone_intervals(prepared.zone_intervals)
+
+    all_flagged = sorted(set(segment_result["artifact_beats"]) | set(zone_flagged))
+    n_beats = segment_result["total_beats"]
+    r_peaks_arr = np.array(r_peaks_sec)
+    time_ranges = []
+    for beat_idx in all_flagged:
+        start = float(r_peaks_arr[beat_idx - 1]) if beat_idx > 0 else 0.0
+        end = float(r_peaks_arr[beat_idx + 1]) if beat_idx < n_beats - 1 else float(r_peaks_arr[-1])
+        time_ranges.append([start, end])
+
+    result = {
+        "artifact_beats": all_flagged,
+        "rhythm_flags": segment_result["rhythm_flags"],
+        "segment_flags": segment_result["segment_flags"],
+        "amplitude_flags": segment_result["amplitude_flags"],
+        "zone_flags": {k: v["flagged"] for k, v in zone_per_zone.items() if v["flagged"]},
+        "zone_details": {k: v for k, v in zone_per_zone.items() if v["flagged"]},
+        "artifact_time_ranges": time_ranges,
+        "total_beats": n_beats,
+        "artifact_ratio": round(len(all_flagged) / n_beats, 4) if n_beats > 0 else 0.0,
+    }
+
     json_data = json.dumps(result, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
+
+
+@app.post('/detect-artifacts/rhythm')
+def detect_artifacts_rhythm():
+    body = request.get_json()
+    sigma = float(body.get('sigma', 3.0)) if isinstance(body, dict) else 3.0
+    input_signal = _extract_signal(body)
+
+    sampling_rate = 500
+    prepared = PreparedSignal(input_signal, sampling_rate)
+    r_peaks_sec = (np.array(prepared.rpeaks["ECG_R_Peaks"]) / sampling_rate).tolist()
+    r_arr = np.array(r_peaks_sec)
+    n_beats = len(r_peaks_sec)
+
+    rr = np.diff(r_arr)
+    z, median_rr, mad_rr = mad_stats(rr)
+    flags = [int(i + 1) for i in range(len(z)) if z[i] > sigma]
+
+    scale = 1.4826 * mad_rr + 1e-9
+    beat_details = [
+        {
+            "beat_idx": int(i + 1),
+            "rr_interval": round(float(rr[i]), 4),
+            "prev_rr": round(float(rr[i - 1]), 4) if i > 0 else None,
+            "next_rr": round(float(rr[i + 1]), 4) if i < len(rr) - 1 else None,
+            "deviation": round(float(abs(rr[i] - median_rr)), 4),
+            "scale": round(float(scale), 4),
+            "z_score": round(float(z[i]), 2),
+            "median_rr": round(median_rr, 4),
+            "reason": "RR interval outlier",
+        }
+        for i in range(len(z)) if z[i] > sigma
+    ]
+
+    # Rhythm anomaly = the interval [i-1, i], so highlight exactly those two peaks.
+    rhythm_time_ranges = []
+    for idx in flags:
+        start = float(r_arr[idx - 1]) if idx > 0 else 0.0
+        end = float(r_arr[idx])
+        rhythm_time_ranges.append([start, end])
+    result = {
+        "flags": flags,
+        "artifact_time_ranges": rhythm_time_ranges,
+        "total_beats": n_beats,
+        "artifact_ratio": round(len(flags) / n_beats, 4) if n_beats > 0 else 0.0,
+    }
+    result["beat_details"] = beat_details
+    result["stats"] = {
+        "median_rr": round(median_rr, 4),
+        "mad": round(mad_rr, 4),
+        "scale": round(float(scale), 4),
+        "sigma": sigma,
+        "n_intervals": int(len(rr)),
+    }
+    app.logger.info(f"Rhythm artifact detection: {len(flags)}/{n_beats} beats flagged (sigma={sigma})")
+    return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
+
+
+@app.post('/detect-artifacts/segment')
+def detect_artifacts_segment():
+    from my_helpers.artifact_detection import detect_by_median_segment
+    body = request.get_json()
+    sigma = float(body.get('sigma', 2.5)) if isinstance(body, dict) else 2.5
+    trim_ratio = float(body.get('trim_ratio', 0.3)) if isinstance(body, dict) else 0.3
+    input_signal = _extract_signal(body)
+
+    sampling_rate = 500
+    prepared = PreparedSignal(input_signal, sampling_rate)
+    r_peaks_sec = (np.array(prepared.rpeaks["ECG_R_Peaks"]) / sampling_rate).tolist()
+    r_arr = np.array(r_peaks_sec)
+    n_beats = len(r_peaks_sec)
+
+    wave_labels = ["P", "QRS", "T"]
+    wave_matrices = [prepared.matrix_P_wave, prepared.matrix_QRS, prepared.matrix_T_wave]
+
+    # per-wave RMSE and z-scores for diagnostics
+    wave_z: dict[str, np.ndarray] = {}
+    wave_rmse: dict[str, np.ndarray] = {}
+    wave_stats: dict[str, dict] = {}
+    seg_mask = np.zeros(n_beats, dtype=bool)
+
+    for label, matrix in zip(wave_labels, wave_matrices):
+        if len(matrix) == 0:
+            continue
+        min_len = min(len(row) for row in matrix)
+        mat = np.array([row[:min_len] for row in matrix], dtype=float)
+        initial_template = np.median(mat, axis=0)
+        initial_rmse = np.sqrt(np.mean((mat - initial_template) ** 2, axis=1))
+        n_keep = max(1, int(len(mat) * (1 - trim_ratio)))
+        keep_idx = np.argsort(initial_rmse)[:n_keep]
+        robust_template = np.median(mat[keep_idx], axis=0)
+        rmse = np.sqrt(np.mean((mat - robust_template) ** 2, axis=1))
+        z, median_rmse, mad_rmse = mad_stats(rmse)
+
+        wave_z[label] = z
+        wave_rmse[label] = rmse
+        wave_stats[label] = {
+            "median_rmse": round(float(median_rmse), 4),
+            "mad": round(float(mad_rmse), 4),
+            "n_beats": len(matrix),
+        }
+
+        m = z > sigma
+        length = min(len(m), n_beats)
+        seg_mask[:length] |= m[:length]
+
+    flags = np.where(seg_mask)[0].tolist()
+
+    # per-beat details: which waves flagged and their z-scores
+    beat_details = []
+    for beat_idx in flags:
+        waves_flagged = []
+        z_scores = {}
+        rmse_values = {}
+        for label in wave_labels:
+            if label not in wave_z or beat_idx >= len(wave_z[label]):
+                continue
+            if wave_z[label][beat_idx] > sigma:
+                waves_flagged.append(label)
+                z_scores[label] = round(float(wave_z[label][beat_idx]), 2)
+                rmse_values[label] = round(float(wave_rmse[label][beat_idx]), 4)
+        beat_details.append({
+            "beat_idx": beat_idx,
+            "waves_flagged": waves_flagged,
+            "z_scores": z_scores,
+            "rmse_values": rmse_values,
+            "reason": "Beat shape deviates from template",
+        })
+
+    result = _type_result(flags, r_arr, n_beats)
+    result["beat_details"] = beat_details
+    result["stats"] = {
+        "sigma": sigma,
+        "trim_ratio": trim_ratio,
+        "wave_stats": wave_stats,
+    }
+    app.logger.info(f"Segment artifact detection: {len(flags)}/{n_beats} beats flagged (sigma={sigma}, trim={trim_ratio})")
+    return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
+
+
+@app.post('/detect-artifacts/amplitude')
+def detect_artifacts_amplitude():
+    body = request.get_json()
+    sigma = float(body.get('sigma', 3.0)) if isinstance(body, dict) else 3.0
+    input_signal = _extract_signal(body)
+
+    sampling_rate = 500
+    prepared = PreparedSignal(input_signal, sampling_rate)
+    r_peak_indices = prepared.rpeaks["ECG_R_Peaks"]
+    r_peaks_sec = (np.array(r_peak_indices) / sampling_rate).tolist()
+    r_arr = np.array(r_peaks_sec)
+    n_beats = len(r_peaks_sec)
+
+    r_amplitudes = np.array([float(input_signal[int(idx)]) for idx in r_peak_indices])
+    z, median_amp, mad_amp = mad_stats(r_amplitudes)
+    flags = [int(i) for i in range(len(z)) if z[i] > sigma]
+
+    scale_amp = 1.4826 * mad_amp + 1e-9
+    beat_details = [
+        {
+            "beat_idx": int(i),
+            "amplitude": round(float(r_amplitudes[i]), 4),
+            "deviation": round(float(abs(r_amplitudes[i] - median_amp)), 4),
+            "scale": round(float(scale_amp), 4),
+            "z_score": round(float(z[i]), 2),
+            "median_amplitude": round(median_amp, 4),
+            "reason": "R-peak amplitude outlier",
+        }
+        for i in range(len(z)) if z[i] > sigma
+    ]
+
+    result = _type_result(flags, r_arr, n_beats)
+    result["beat_details"] = beat_details
+    result["stats"] = {
+        "median_amplitude": round(median_amp, 4),
+        "mad": round(mad_amp, 4),
+        "scale": round(float(scale_amp), 4),
+        "sigma": sigma,
+    }
+    app.logger.info(f"Amplitude artifact detection: {len(flags)}/{n_beats} beats flagged (sigma={sigma})")
+    return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
 
 
 @app.post('/proc/<string:op>')

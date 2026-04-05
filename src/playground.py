@@ -1,11 +1,17 @@
 import sys
 import os
+import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
 import wfdb
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(levelname)-8s %(name)s: %(message)s",
+)
 
 from preparedSignal import PreparedSignal
 

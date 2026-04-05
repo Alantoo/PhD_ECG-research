@@ -9,6 +9,20 @@ def _mad_z_scores(values):
     return np.abs(values - median) / scale
 
 
+def mad_stats(values):
+    """Return (z_scores, median, mad) for a series of values.
+
+    Useful for callers that need both the outlier flags and the underlying
+    distribution statistics for diagnostic reporting.
+    """
+    values = np.asarray(values, dtype=float)
+    median = float(np.median(values))
+    mad = float(np.median(np.abs(values - median)))
+    scale = 1.4826 * mad + 1e-9
+    z = np.abs(values - median) / scale
+    return z, median, mad
+
+
 def detect_by_rhythm(r_peaks_sec, threshold_sigma=3.0):
     """Flag beats where the RR interval is an outlier (MAD-based z-score).
 
@@ -57,6 +71,69 @@ def detect_by_amplitude(r_amplitudes, threshold_sigma=3.0):
     if len(r_amplitudes) == 0:
         return np.array([], dtype=bool)
     return _mad_z_scores(np.asarray(r_amplitudes, dtype=float)) > threshold_sigma
+
+
+def detect_by_zone_intervals(zone_intervals, threshold_sigma=3.0):
+    """Flag beats whose inter-peak interval is an outlier within its zone.
+
+    Each zone is evaluated independently — a NaN peak in one zone does not
+    affect interval computation in another zone, and non-consecutive beat
+    pairs (where one beat was skipped) are excluded from comparison.
+
+    Parameters
+    ----------
+    zone_intervals : dict[str, list[tuple[int, float]]]
+        Mapping of zone name → list of (beat_index, interval_seconds) pairs.
+        Only consecutive-beat pairs are expected (callers must enforce this).
+    threshold_sigma : float
+        MAD z-score threshold above which a beat is flagged.
+
+    Returns
+    -------
+    per_zone : dict[str, dict]
+        Per-zone dict with keys:
+            flagged  - list of flagged beat indices
+            details  - list of {beat_idx, interval, z_score} for flagged beats
+            stats    - {median_interval, mad, sigma, n_intervals}
+    all_flagged : list[int]
+        Sorted union of all flagged beat indices across zones.
+    """
+    per_zone: dict[str, dict] = {}
+    all_flagged: set[int] = set()
+
+    for zone, intervals in zone_intervals.items():
+        if len(intervals) < 3:
+            per_zone[zone] = {"flagged": [], "details": [], "stats": {"n_intervals": len(intervals), "sigma": threshold_sigma}}
+            continue
+        beat_indices = [b for b, _ in intervals]
+        values = np.array([v for _, v in intervals], dtype=float)
+        z, median, mad = mad_stats(values)
+
+        flagged = []
+        details = []
+        for i in range(len(z)):
+            if z[i] > threshold_sigma:
+                flagged.append(beat_indices[i])
+                details.append({
+                    "beat_idx": beat_indices[i],
+                    "interval": round(float(values[i]), 4),
+                    "z_score": round(float(z[i]), 2),
+                    "median_interval": round(median, 4),
+                })
+
+        per_zone[zone] = {
+            "flagged": flagged,
+            "details": details,
+            "stats": {
+                "median_interval": round(median, 4),
+                "mad": round(mad, 4),
+                "sigma": threshold_sigma,
+                "n_intervals": len(intervals),
+            },
+        }
+        all_flagged.update(flagged)
+
+    return per_zone, sorted(all_flagged)
 
 
 def detect_artifacts(r_peaks_sec, r_amplitudes, segment_matrices,
