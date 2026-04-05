@@ -146,7 +146,25 @@ class Simulation:
 
         return self.gen_ecg_from_matrix(output_matrix, time_peaks_rhythm, cfg)
 
-    def gen_ecg_from_matrix(self, ecg_matrix, rhythm_matrix, cfg: ArtifactsConfig):
+    def gen_ecg_from_prepared(self, prepared, cfg: ArtifactsConfig):
+        """Generate ECG from a PreparedSignal using 6 anatomical zones.
+
+        Zone indices match PreparedSignal.get_6zone_matrices():
+            0 — TP baseline   (T_off → P_on)
+            1 — P-wave        (P_on  → P_off)
+            2 — PQ segment    (P_off → Q)
+            3 — QRS complex   (Q     → S)
+            4 — ST segment    (S     → T_on)
+            5 — T-wave        (T_on  → T_off)
+        """
+        matrices, rhythm_matrix = prepared.get_6zone_matrices()
+        if not matrices[0]:
+            raise ValueError(
+                "PreparedSignal has no valid 6-zone cycles — check delineation quality"
+            )
+        return self.gen_ecg_from_matrix(matrices, rhythm_matrix, cfg, prepared.sampling_rate)
+
+    def gen_ecg_from_matrix(self, ecg_matrix, rhythm_matrix, cfg: ArtifactsConfig, sampling_rate: int = 500):
         interpolated_matrix = []
         mean_matrix = []
         variance_matrix = []
@@ -225,8 +243,31 @@ class Simulation:
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
                     max_ts = segment_cfg.points[-1][0]
-                    rhythm_ratio = mean_rhythm / max_ts
+
+                    # X-axis: scale to explicit duration (seconds→samples) or mean zone duration
+                    if segment_cfg.duration is not None and segment_cfg.duration > 0:
+                        target_samples = segment_cfg.duration * sampling_rate
+                        rhythm_ratio = target_samples / max_ts if max_ts > 0 else 1.0
+                    else:
+                        rhythm_ratio = mean_rhythm / max_ts if max_ts > 0 else 1.0
+
                     scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
+
+                    # Y-axis: remap amplitude to [min_height, max_height]
+                    if segment_cfg.min_height is not None and segment_cfg.max_height is not None:
+                        y_vals = [p[1] for p in scaled_points]
+                        y_min, y_max = min(y_vals), max(y_vals)
+                        y_range = y_max - y_min
+                        h_range = segment_cfg.max_height - segment_cfg.min_height
+                        if y_range > 0:
+                            scaled_points = [
+                                [p[0], segment_cfg.min_height + (p[1] - y_min) / y_range * h_range]
+                                for p in scaled_points
+                            ]
+                        else:
+                            mid = (segment_cfg.min_height + segment_cfg.max_height) / 2
+                            scaled_points = [[p[0], mid] for p in scaled_points]
+
                     t, v = zip(*scaled_points)
                     append_seg_point(t, v)
                     continue
@@ -301,7 +342,7 @@ class Simulation:
 
         return final_seq['points'], meta
 
-    def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig):
+    def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig, sampling_rate: int = 500):
         def to_matrix(time_series):
             values = time_series[1]
             matrix = list()
@@ -358,8 +399,29 @@ class Simulation:
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
                     max_ts = segment_cfg.points[-1][0]
-                    rhythm_ratio = mean_rhythm / max_ts
+
+                    if segment_cfg.duration is not None and segment_cfg.duration > 0:
+                        target_samples = segment_cfg.duration * sampling_rate
+                        rhythm_ratio = target_samples / max_ts if max_ts > 0 else 1.0
+                    else:
+                        rhythm_ratio = mean_rhythm / max_ts if max_ts > 0 else 1.0
+
                     scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
+
+                    if segment_cfg.min_height is not None and segment_cfg.max_height is not None:
+                        y_vals = [p[1] for p in scaled_points]
+                        y_min, y_max = min(y_vals), max(y_vals)
+                        y_range = y_max - y_min
+                        h_range = segment_cfg.max_height - segment_cfg.min_height
+                        if y_range > 0:
+                            scaled_points = [
+                                [p[0], segment_cfg.min_height + (p[1] - y_min) / y_range * h_range]
+                                for p in scaled_points
+                            ]
+                        else:
+                            mid = (segment_cfg.min_height + segment_cfg.max_height) / 2
+                            scaled_points = [[p[0], mid] for p in scaled_points]
+
                     t, v = zip(*scaled_points)
                     append_seg_point(t, v)
                     continue

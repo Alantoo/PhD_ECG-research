@@ -208,6 +208,100 @@ class PreparedSignal:
             kept, total, skipped_nan, skipped_too_short,
         )
 
+    def get_6zone_matrices(self):
+        """
+        Returns (matrices, rhythm_matrix) for 6 anatomical zones, aligned beat-by-beat.
+
+        Zone indices:
+            0 — TP baseline (T_off[i-1] → P_on[i])
+            1 — P-wave      (P_on        → P_off)
+            2 — PQ segment  (P_off       → Q)
+            3 — QRS complex (Q           → S)
+            4 — ST segment  (S           → T_on)
+            5 — T-wave      (T_on        → T_off)
+
+        Each matrices[z] is a list of numpy arrays (one per valid cycle).
+        rhythm_matrix[z] is a list of ints (duration in samples per cycle).
+        """
+        sig_arr = np.array(self.signal)
+
+        def extract(on_sec, off_sec):
+            s = int(float(on_sec) * self.sampling_rate)
+            e = int(float(off_sec) * self.sampling_rate)
+            return sig_arr[s:e] if e > s else None
+
+        n         = len(self.ECG_P_Onsets)
+        p_on_arr  = np.array(self.ECG_P_Onsets,  dtype=float)
+        p_off_arr = np.array(self.ECG_P_Offsets, dtype=float)
+        q_arr     = np.array(self.ECG_Q_Peaks,   dtype=float)
+        s_arr     = np.array(self.ECG_S_Peaks,   dtype=float)
+        t_on_arr  = np.array(self.ECG_T_Onsets,  dtype=float)
+        t_off_arr = np.array(self.ECG_T_Offsets, dtype=float)
+
+        matrices      = [[] for _ in range(6)]
+        rhythm_matrix = [[] for _ in range(6)]
+        skipped = 0
+
+        for i in range(1, n):
+            t_off_prev = t_off_arr[i - 1]
+            p_on  = p_on_arr[i]
+            p_off = p_off_arr[i]
+            q     = q_arr[i]
+            s     = s_arr[i]
+            t_on  = t_on_arr[i]
+            t_off = t_off_arr[i]
+
+            fiducials = [t_off_prev, p_on, p_off, q, s, t_on, t_off]
+            if any(np.isnan(float(v)) for v in fiducials):
+                skipped += 1
+                continue
+
+            if not (t_off_prev < p_on < p_off < q < s < t_on < t_off):
+                skipped += 1
+                continue
+
+            segs = [
+                extract(t_off_prev, p_on),  # 0 TP baseline
+                extract(p_on,  p_off),       # 1 P-wave
+                extract(p_off, q),           # 2 PQ segment
+                extract(q,     s),           # 3 QRS complex
+                extract(s,     t_on),        # 4 ST segment
+                extract(t_on,  t_off),       # 5 T-wave
+            ]
+
+            if any(x is None or len(x) < 2 for x in segs):
+                skipped += 1
+                continue
+
+            for z, seg in enumerate(segs):
+                matrices[z].append(seg)
+                rhythm_matrix[z].append(len(seg))
+
+        logger.info(
+            "get_6zone_matrices: %d valid cycles, %d skipped",
+            len(matrices[0]), skipped,
+        )
+        return matrices, rhythm_matrix
+
+    def get_6zone_rhythm_points(self):
+        """
+        Returns rhythm as interleaved 6-zone durations (samples) for use with
+        /v2/modelling/math_stats (segments_count=6).
+
+        Decoded by: rhythm_values[z::6] gives durations for zone z across all cycles.
+        """
+        _, rhythm_matrix = self.get_6zone_matrices()
+        if not rhythm_matrix[0]:
+            return []
+        n_cycles = min(len(rm) for rm in rhythm_matrix)
+        points   = []
+        beat_idx = 1
+        for i in range(n_cycles):
+            for rm in rhythm_matrix:
+                points.append([round(beat_idx / 7, 6), rm[i]])
+                beat_idx += 1
+        return points
+
     def get_interpolated_matrix(self):
         mod_sampling_rate = int(self.sampling_rate * self.multiplier)
         interp_matrix = []
@@ -278,4 +372,5 @@ class PreparedSignal:
             "central_moment_functions_fourth_order": to_data_points(centralMomentFunctionsFourthOrder),
             "variance": to_data_points(variance),
             "rhythm": self.rhythm_points,
+            "rhythm_6zones": self.get_6zone_rhythm_points(),
         }

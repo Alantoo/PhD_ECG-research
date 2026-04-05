@@ -315,16 +315,13 @@ def get_signal_modelled(database, datafile, signal):
                 count = int(artifacts['count'])
                 segments = artifacts['segments']
 
-    cfg = ArtifactsConfig(count, segments)
+    artifacts_cfg = ArtifactsConfig(count, segments)
 
-    s = Simulation()
-    generated, meta = s.gen_ecg_from_prototype(data, 500, cfg)
+    prepared  = PreparedSignal(data, 500, delineation_method='dwt', r_peak_method='neurokit')
+    s         = Simulation()
+    generated, meta = s.gen_ecg_from_prepared(prepared, artifacts_cfg)
 
-    # intervals_cache[key] = data
-    result = {
-        "signal": generated,
-        "meta": meta,
-    }
+    result    = {"signal": generated, "meta": meta}
     json_data = json.dumps(result, ignore_nan=True, cls=NumpyEncoder)
     return Response(json_data, mimetype='application/json')
 
@@ -364,15 +361,8 @@ def generate_mat_stats():
     if len(rawSignal) > 2 and len(rawSignal[0]) == 2:
         input = np.transpose(rawSignal).tolist()[1]
 
-    prepared = PreparedSignal(input, 500)
-    # cfg = new_cfg(database, datafile, signal)
-    # statistics = MathematicalStatistics(input)
-    #
-    # stats = PlotStatistics(statistics, 500, None,
-    #                        input).get_math_stats_points()
-
-    stats = prepared.get_stats()
-
+    prepared  = PreparedSignal(input, 500, delineation_method='dwt', r_peak_method='neurokit')
+    stats     = prepared.get_stats()
     json_data = json.dumps(stats, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
@@ -1370,8 +1360,16 @@ def simulate_ecg_from_math_stats():
     cfg = ArtifactsConfig(count, segments)
 
     variance_data = to_np_array_on_demand(body['variance'])
-    mean_data = to_np_array_on_demand(body['mean'])
-    rhythm_data = to_np_array_on_demand(body['rhythm'])
+    mean_data     = to_np_array_on_demand(body['mean'])
+
+    # Prefer 6-zone rhythm (anatomical zones from DWT+Neurokit); fall back to
+    # legacy 5-peak-type format for backward compatibility.
+    if body.get('rhythm_6zones'):
+        segments_count = 6
+        rhythm_data    = to_np_array_on_demand(body['rhythm_6zones'])
+    else:
+        segments_count = 5
+        rhythm_data    = to_np_array_on_demand(body['rhythm'])
 
     sim = Simulation()
     generated, meta = sim.gen_ecg_from_math_stats(segments_count, mean_data, variance_data, rhythm_data, cfg)
