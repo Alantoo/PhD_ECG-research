@@ -775,10 +775,13 @@ def _build_type_result(artifact_indices, n_beats, r_arr, unreliable_indices=None
         if not (0 <= idx < n_beats):
             continue
         if valid_beats and idx < len(valid_beats):
-            bd = (valid_beats[idx].get('waveform') or {})
+            b  = valid_beats[idx]
+            bd = b.get('boundaries') or {}
             s, e = bd.get('start'), bd.get('end')
+            if s is None: s = b.get('p_on') or b.get('q') or b.get('r')
+            if e is None: e = b.get('t_off') or b.get('t_on') or b.get('s') or b.get('r')
             if s is not None and e is not None:
-                unreliable_ranges.append([s, e])
+                unreliable_ranges.append([float(s), float(e)])
                 continue
         unreliable_ranges.append(_range_for(idx))
 
@@ -819,7 +822,14 @@ def _detect_rhythm_artifacts_v2(valid_beats, sigma):
     Reads b['intervals']['rr'] directly — no signal re-processing.
     Returns (artifact_indices, artifact_time_ranges, beat_details, stats)
     where artifact_indices are positions into valid_beats.
+
+    Two-gate flagging mirrors the segment detector:
+      1. z-score > sigma  (statistical outlier)
+      2. deviation > MIN_RR_DEVIATION  (must differ by ≥120 ms from median)
+    Normal beat-to-beat HRV rarely exceeds 120 ms; anything less is physiology.
     """
+    MIN_RR_DEVIATION = 0.120  # seconds — 120 ms absolute floor
+
     indexed_rr = [
         (i, float(b['intervals']['rr']))
         for i, b in enumerate(valid_beats)
@@ -831,21 +841,22 @@ def _detect_rhythm_artifacts_v2(valid_beats, sigma):
 
     rr_arr = np.array([rr for _, rr in indexed_rr])
     z, median_rr, mad_rr = mad_stats(rr_arr)
-    scale = 1.4826 * mad_rr + 1e-9
+    scale = max(1.4826 * mad_rr + 1e-9, MIN_RR_DEVIATION / sigma)
 
     artifact_indices = []
     beat_details = []
     for j, (vb_idx, rr_val) in enumerate(indexed_rr):
-        if z[j] > sigma:
+        deviation = abs(rr_val - median_rr)
+        cur_z     = deviation / scale
+        if cur_z > sigma and deviation > MIN_RR_DEVIATION:
             artifact_indices.append(vb_idx)
-            deviation = round(abs(rr_val - median_rr), 4)
             beat_details.append({
                 "beat_idx":    vb_idx,
                 "zone":        "ECG_R_Peaks",
                 "rr_interval": round(rr_val, 4),
-                "deviation":   deviation,
+                "deviation":   round(float(deviation), 4),
                 "scale":       round(float(scale), 4),
-                "z_score":     round(float(z[j]), 2),
+                "z_score":     round(float(cur_z), 2),
                 "median_rr":   round(median_rr, 4),
                 "reason":      "RR interval outlier",
             })
@@ -858,11 +869,12 @@ def _detect_rhythm_artifacts_v2(valid_beats, sigma):
             artifact_time_ranges.append([float(r_prev), float(r_curr)])
 
     stats = {
-        "median_rr":   round(median_rr, 4),
-        "mad":         round(mad_rr, 4),
-        "scale":       round(float(scale), 4),
-        "sigma":       sigma,
-        "n_intervals": len(rr_arr),
+        "median_rr":       round(median_rr, 4),
+        "mad":             round(mad_rr, 4),
+        "scale":           round(float(scale), 4),
+        "min_rr_deviation": MIN_RR_DEVIATION,
+        "sigma":           sigma,
+        "n_intervals":     len(rr_arr),
     }
 
     return artifact_indices, artifact_time_ranges, beat_details, stats
@@ -874,7 +886,17 @@ def _detect_segment_artifacts_v2(valid_beats, sigma):
     Uses 1 - b['template_correlation'] as a dissimilarity score.
     No signal re-processing needed.
     Returns (artifact_indices, artifact_time_ranges, beat_details, stats).
+
+    Two-gate flagging prevents over-sensitivity on clean signals:
+      1. z-score > sigma  (relative outlier vs the distribution)
+      2. dissimilarity > MIN_DISSIMILARITY  (absolute floor: correlation < 0.90)
+    Both gates must pass.  This stops the MAD collapsing to near-zero on a
+    homogeneous signal and turning every slightly-imperfect beat into an outlier.
     """
+    # Beats must fall below this correlation to be flaggable at all.
+    # correlation >= 0.85  →  the beat looks ≥85% like the template → not an artifact.
+    MIN_DISSIMILARITY = 0.15   # == correlation < 0.85
+
     indexed = [
         (i, float(b['template_correlation']))
         for i, b in enumerate(valid_beats)
@@ -886,52 +908,61 @@ def _detect_segment_artifacts_v2(valid_beats, sigma):
 
     dissimilarity = np.array([1.0 - tc for _, tc in indexed])
     z, median_d, mad_d = mad_stats(dissimilarity)
-    scale = 1.4826 * mad_d + 1e-9
+    # Enforce a minimum scale so that a homogeneous signal (tiny MAD) doesn't
+    # magnify minor deviations into huge z-scores.
+    scale = max(1.4826 * mad_d + 1e-9, MIN_DISSIMILARITY / sigma)
 
     artifact_set = set()
     beat_details  = []
 
-    # Template correlation outliers
     for j, (vb_idx, tc) in enumerate(indexed):
-        if z[j] > sigma:
+        d = float(dissimilarity[j])
+        current_z = float(abs(d - median_d)) / scale
+        if current_z > sigma and d > MIN_DISSIMILARITY:
             artifact_set.add(vb_idx)
             beat_details.append({
                 "beat_idx":             vb_idx,
                 "template_correlation": round(tc, 3),
-                "dissimilarity":        round(float(dissimilarity[j]), 4),
-                "deviation":            round(float(abs(dissimilarity[j] - median_d)), 4),
-                "scale":                round(float(scale), 4),
-                "z_score":              round(float(z[j]), 2),
+                "dissimilarity":        round(d, 4),
+                "deviation":            round(abs(d - median_d), 4),
+                "scale":                round(scale, 4),
+                "z_score":              round(current_z, 2),
                 "reason":               "Beat shape deviates from template",
             })
 
-    # Wide QRS — explicit morphology flag regardless of z-score
-    for i, b in enumerate(valid_beats):
-        if (b.get('morphology') or {}).get('wide_qrs') and i not in artifact_set:
-            artifact_set.add(i)
-            tc = b.get('template_correlation')
-            beat_details.append({
-                "beat_idx":             i,
-                "template_correlation": round(tc, 3) if tc is not None else None,
-                "reason":               "Wide QRS complex",
-            })
+    # Wide QRS — only flag as artifact when it is NOT the majority pattern.
+    # If more than 30 % of beats are wide, it is a persistent morphology
+    # (e.g. bundle branch block), not beat-level noise.
+    wide_qrs_beats = [i for i, b in enumerate(valid_beats)
+                      if (b.get('morphology') or {}).get('wide_qrs')]
+    wide_qrs_is_majority = len(wide_qrs_beats) / max(len(valid_beats), 1) > 0.30
+    if not wide_qrs_is_majority:
+        for i in wide_qrs_beats:
+            if i not in artifact_set:
+                artifact_set.add(i)
+                tc = valid_beats[i].get('template_correlation')
+                beat_details.append({
+                    "beat_idx":             i,
+                    "template_correlation": round(tc, 3) if tc is not None else None,
+                    "reason":               "Wide QRS complex",
+                })
 
     artifact_indices = sorted(artifact_set)
 
     artifact_time_ranges = []
     for vb_idx in artifact_indices:
         b  = valid_beats[vb_idx]
-        wf = b.get('waveform') or {}
-        s, e = wf.get('start'), wf.get('end')
-        if s is not None and e is not None:
+        bd = b.get('boundaries') or {}
+        s  = bd.get('start') or b.get('p_on') or b.get('q') or b.get('r')
+        e  = bd.get('end')   or b.get('t_off') or b.get('t_on') or b.get('s') or b.get('r')
+        if s is not None and e is not None and float(e) > float(s):
             artifact_time_ranges.append([float(s), float(e)])
-        elif b.get('r') is not None:
-            artifact_time_ranges.append([float(b['r']), float(b['r'])])
 
     stats = {
         "median_dissimilarity": round(median_d, 4),
         "mad":                  round(mad_d, 4),
-        "scale":                round(float(scale), 4),
+        "scale":                round(scale, 4),
+        "min_dissimilarity":    MIN_DISSIMILARITY,
         "sigma":                sigma,
         "n_beats":              len(indexed),
     }
@@ -1201,33 +1232,43 @@ def detect_artifacts_amplitude():
             result["stats"] = {"sigma": sigma}
             return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
 
+        # Beat must deviate by at least this fraction of the median amplitude
+        # to be flaggable at all — prevents micro-variations in a consistent
+        # signal from inflating z-scores when MAD collapses near zero.
+        MIN_RELATIVE_DEVIATION = 0.15  # 15 % of median amplitude
+
         amp_arr = np.array([a for _, a in indexed_amp])
         z, median_amp, mad_amp = mad_stats(amp_arr)
-        scale_amp = 1.4826 * mad_amp + 1e-9
+        abs_floor = abs(median_amp) * MIN_RELATIVE_DEVIATION if median_amp != 0 else 1e-6
+        scale_amp = max(1.4826 * mad_amp + 1e-9, abs_floor / sigma)
 
         artifact_indices = []
         beat_details     = []
         for j, (vb_idx, amp_val) in enumerate(indexed_amp):
-            if z[j] > sigma:
+            deviation = abs(amp_val - median_amp)
+            cur_z     = deviation / scale_amp
+            if cur_z > sigma and deviation > abs_floor:
                 artifact_indices.append(vb_idx)
                 beat_details.append({
-                    "beat_idx":         vb_idx,
-                    "amplitude":        round(amp_val, 4),
-                    "deviation":        round(float(abs(amp_val - median_amp)), 4),
-                    "scale":            round(float(scale_amp), 4),
-                    "z_score":          round(float(z[j]), 2),
-                    "median_amplitude": round(median_amp, 4),
-                    "reason":           "R-peak amplitude outlier",
+                    "beat_idx":              vb_idx,
+                    "amplitude":             round(amp_val, 4),
+                    "deviation":             round(float(deviation), 4),
+                    "scale":                 round(float(scale_amp), 4),
+                    "z_score":               round(float(cur_z), 2),
+                    "median_amplitude":      round(median_amp, 4),
+                    "min_relative_deviation": MIN_RELATIVE_DEVIATION,
+                    "reason":                "R-peak amplitude outlier",
                 })
 
         unreliable_indices = _get_unreliable_indices(valid_beats)
         result = _build_type_result(artifact_indices, n_beats, r_arr, unreliable_indices, valid_beats)
         result["beat_details"] = beat_details
         result["stats"] = {
-            "median_amplitude": round(median_amp, 4),
-            "mad":              round(mad_amp, 4),
-            "scale":            round(float(scale_amp), 4),
-            "sigma":            sigma,
+            "median_amplitude":      round(median_amp, 4),
+            "mad":                   round(mad_amp, 4),
+            "scale":                 round(float(scale_amp), 4),
+            "min_relative_deviation": MIN_RELATIVE_DEVIATION,
+            "sigma":                 sigma,
         }
     else:
         # fallback: re-detect from raw signal via PreparedSignal
@@ -1239,21 +1280,26 @@ def detect_artifacts_amplitude():
         n_beats        = len(r_peak_indices)
         r_amplitudes   = np.array([float(input_signal[int(idx)]) for idx in r_peak_indices])
 
+        MIN_RELATIVE_DEVIATION = 0.15
         z, median_amp, mad_amp = mad_stats(r_amplitudes)
-        scale_amp        = 1.4826 * mad_amp + 1e-9
-        artifact_indices = [int(i) for i in range(len(z)) if z[i] > sigma]
-        beat_details     = [
-            {
-                "beat_idx":         int(i),
-                "amplitude":        round(float(r_amplitudes[i]), 4),
-                "deviation":        round(float(abs(r_amplitudes[i] - median_amp)), 4),
-                "scale":            round(float(scale_amp), 4),
-                "z_score":          round(float(z[i]), 2),
-                "median_amplitude": round(median_amp, 4),
-                "reason":           "R-peak amplitude outlier",
-            }
-            for i in range(len(z)) if z[i] > sigma
-        ]
+        abs_floor = abs(median_amp) * MIN_RELATIVE_DEVIATION if median_amp != 0 else 1e-6
+        scale_amp = max(1.4826 * mad_amp + 1e-9, abs_floor / sigma)
+        artifact_indices = []
+        beat_details     = []
+        for i in range(len(z)):
+            deviation = abs(float(r_amplitudes[i]) - median_amp)
+            cur_z     = deviation / scale_amp
+            if cur_z > sigma and deviation > abs_floor:
+                artifact_indices.append(int(i))
+                beat_details.append({
+                    "beat_idx":         int(i),
+                    "amplitude":        round(float(r_amplitudes[i]), 4),
+                    "deviation":        round(float(deviation), 4),
+                    "scale":            round(float(scale_amp), 4),
+                    "z_score":          round(float(cur_z), 2),
+                    "median_amplitude": round(median_amp, 4),
+                    "reason":           "R-peak amplitude outlier",
+                })
 
         result = _build_type_result(artifact_indices, n_beats, r_arr, [], [])
         result["beat_details"] = beat_details
