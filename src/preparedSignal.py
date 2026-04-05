@@ -9,13 +9,17 @@ logger = logging.getLogger(__name__)
 
 
 class PreparedSignal:
-    def __init__(self, signal, sampling_rate, delineation_method='dwt'):
+    def __init__(self, signal, sampling_rate, delineation_method='dwt', r_peak_method='xqrs'):
         self.sampling_rate = sampling_rate
         self.signal = signal
         self.multiplier = 1
 
         cleaned = nk.ecg_clean(signal, sampling_rate=self.sampling_rate)
-        r_indices = wfdb.processing.xqrs_detect(np.array(cleaned, dtype=float), fs=self.sampling_rate, verbose=False)
+        if r_peak_method == 'xqrs':
+            r_indices = wfdb.processing.xqrs_detect(np.array(cleaned, dtype=float), fs=self.sampling_rate, verbose=False)
+        else:
+            _, info = nk.ecg_peaks(cleaned, sampling_rate=self.sampling_rate, method=r_peak_method)
+            r_indices = info['ECG_R_Peaks']
         rpeaks = {"ECG_R_Peaks": r_indices}
         n_beats = len(rpeaks["ECG_R_Peaks"])
 
@@ -56,8 +60,13 @@ class PreparedSignal:
             waves_cwt = _delineate('cwt')
             merged = _merge_waves(waves_dwt, waves_cwt, wave_keys)
             waves = {k: merged[k].tolist() for k in wave_keys}
+            # Stored for consensus computation in the caller
+            self.waves_dwt = waves_dwt
+            self.waves_cwt = waves_cwt
         else:
             _, waves = nk.ecg_delineate(cleaned, rpeaks, sampling_rate=self.sampling_rate, method=delineation_method)
+            self.waves_dwt = None
+            self.waves_cwt = None
 
         def to_sec(key):
             raw = waves.get(key, [])

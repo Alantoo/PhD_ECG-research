@@ -1,5 +1,10 @@
 import numpy as np
 
+# Per-beat flag values returned in the ``flags`` array of ArtifactTypeResult.
+FLAG_CLEAN             = 0  # no issue detected
+FLAG_ARTIFACT          = 1  # beat is an artifact
+FLAG_UNRELIABLE_SOURCE = 2  # partial beat — detection quality too low to judge
+
 
 def _mad_z_scores(values):
     values = np.asarray(values, dtype=float)
