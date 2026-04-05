@@ -699,8 +699,10 @@ def _prepare_from_beats(signal_y, beats, sampling_rate):
         seg = sig[s:e]
         return seg.tolist() if len(seg) >= 2 else None
 
+    # matrix_indices[i] = index into valid_b for matrix entry i (all three matrices share the same index list)
+    matrix_indices = []
     matrix_P, matrix_QRS, matrix_T = [], [], []
-    for b in valid_b:
+    for idx_b, b in enumerate(valid_b):
         p_on, p_off = b.get('p_on'), b.get('p_off')
         q, s_val = b.get('q'), b.get('s')
         t_on, t_off = b.get('t_on'), b.get('t_off')
@@ -708,13 +710,17 @@ def _prepare_from_beats(signal_y, beats, sampling_rate):
             pw  = extract(p_on, p_off)
             qrs = extract(q, s_val)
             tw  = extract(t_on, t_off)
-            if pw  is not None: matrix_P.append(pw)
-            if qrs is not None: matrix_QRS.append(qrs)
-            if tw  is not None: matrix_T.append(tw)
+            if pw is not None and qrs is not None and tw is not None:
+                matrix_P.append(pw)
+                matrix_QRS.append(qrs)
+                matrix_T.append(tw)
+                matrix_indices.append(idx_b)
 
-    # Zone intervals: R → r, P proxy → p_on, T proxy → t_on, Q → q, S → s
-    zone_keys   = ["ECG_R_Peaks", "ECG_P_Peaks", "ECG_T_Peaks", "ECG_Q_Peaks", "ECG_S_Peaks"]
-    zone_fields = ["r",           "p_on",         "t_on",        "q",           "s"]
+    # Zone intervals: only use R, Q, S peaks — these are true peaks present in the beat struct.
+    # P and T are represented only as onsets/offsets (not peaks), making their inter-beat
+    # intervals much noisier than R-peak intervals and unsuitable for zone-based detection.
+    zone_keys   = ["ECG_R_Peaks", "ECG_Q_Peaks", "ECG_S_Peaks"]
+    zone_fields = ["r",           "q",           "s"]
 
     zone_intervals  = {}
     zone_peak_times = {}
@@ -729,15 +735,16 @@ def _prepare_from_beats(signal_y, beats, sampling_rate):
         zone_peak_times[key] = times
 
     return {
-        'r_peaks_sec':   r_peaks_sec,
-        'r_arr':         r_arr,
-        'r_amplitudes':  r_amplitudes,
-        'matrix_P_wave': matrix_P,
-        'matrix_QRS':    matrix_QRS,
-        'matrix_T_wave': matrix_T,
-        'zone_intervals':   zone_intervals,
-        'zone_peak_times':  zone_peak_times,
-        'n_beats':       n_beats,
+        'r_peaks_sec':    r_peaks_sec,
+        'r_arr':          r_arr,
+        'r_amplitudes':   r_amplitudes,
+        'matrix_P_wave':  matrix_P,
+        'matrix_QRS':     matrix_QRS,
+        'matrix_T_wave':  matrix_T,
+        'matrix_indices': matrix_indices,
+        'zone_intervals':    zone_intervals,
+        'zone_peak_times':   zone_peak_times,
+        'n_beats':        n_beats,
     }
 
 
@@ -806,6 +813,61 @@ def _get_unreliable_indices(valid_beats):
     return [i for i, b in enumerate(valid_beats) if b.get('status') == 'partial']
 
 
+def _detect_rhythm_artifacts_v2(valid_beats, sigma):
+    """Rhythm artifact detection using pre-computed beat intervals.
+
+    Reads b['intervals']['rr'] directly — no signal re-processing.
+    Returns (artifact_indices, artifact_time_ranges, beat_details, stats)
+    where artifact_indices are positions into valid_beats.
+    """
+    indexed_rr = [
+        (i, float(b['intervals']['rr']))
+        for i, b in enumerate(valid_beats)
+        if (b.get('intervals') or {}).get('rr') is not None
+    ]
+
+    if len(indexed_rr) < 3:
+        return [], [], [], {}
+
+    rr_arr = np.array([rr for _, rr in indexed_rr])
+    z, median_rr, mad_rr = mad_stats(rr_arr)
+    scale = 1.4826 * mad_rr + 1e-9
+
+    artifact_indices = []
+    beat_details = []
+    for j, (vb_idx, rr_val) in enumerate(indexed_rr):
+        if z[j] > sigma:
+            artifact_indices.append(vb_idx)
+            deviation = round(abs(rr_val - median_rr), 4)
+            beat_details.append({
+                "beat_idx":    vb_idx,
+                "zone":        "ECG_R_Peaks",
+                "rr_interval": round(rr_val, 4),
+                "deviation":   deviation,
+                "scale":       round(float(scale), 4),
+                "z_score":     round(float(z[j]), 2),
+                "median_rr":   round(median_rr, 4),
+                "reason":      "RR interval outlier",
+            })
+
+    artifact_time_ranges = []
+    for vb_idx in artifact_indices:
+        r_curr = valid_beats[vb_idx].get('r')
+        r_prev = valid_beats[vb_idx - 1].get('r') if vb_idx > 0 else None
+        if r_curr is not None and r_prev is not None:
+            artifact_time_ranges.append([float(r_prev), float(r_curr)])
+
+    stats = {
+        "median_rr":   round(median_rr, 4),
+        "mad":         round(mad_rr, 4),
+        "scale":       round(float(scale), 4),
+        "sigma":       sigma,
+        "n_intervals": len(rr_arr),
+    }
+
+    return artifact_indices, artifact_time_ranges, beat_details, stats
+
+
 @app.post('/detect-artifacts')
 def detect_artifacts_endpoint():
     raw_signal = request.get_json()
@@ -858,104 +920,93 @@ def detect_artifacts_endpoint():
 def detect_artifacts_rhythm():
     body = request.get_json()
     sigma = float(body.get('sigma', 3.0)) if isinstance(body, dict) else 3.0
-    input_signal = _extract_signal(body)
     beats = _extract_beats_from_body(body)
 
-    sampling_rate = 500
     if beats:
-        prep = _prepare_from_beats(input_signal, beats, sampling_rate)
-        r_peaks_sec     = prep['r_peaks_sec']
-        r_arr           = prep['r_arr']
-        n_beats         = prep['n_beats']
-        zone_intervals  = prep['zone_intervals']
-        zone_peak_times = prep['zone_peak_times']
-        valid_beats     = [b for b in beats if not b.get('skipped') and b.get('r') is not None]
+        # v2: use pre-computed beat intervals directly — no signal re-processing
+        valid_beats = [b for b in beats if not b.get('skipped') and b.get('r') is not None]
+        n_beats     = len(valid_beats)
+        r_arr       = np.array([float(b['r']) for b in valid_beats])
+
+        artifact_indices, artifact_time_ranges, beat_details, stats = \
+            _detect_rhythm_artifacts_v2(valid_beats, sigma)
+
+        unreliable_indices = _get_unreliable_indices(valid_beats)
+        result = _build_type_result(artifact_indices, n_beats, r_arr, unreliable_indices, valid_beats)
+        result["artifact_time_ranges"] = artifact_time_ranges
+        result["beat_details"]         = beat_details
+        result["stats"]                = stats
     else:
+        # fallback: re-detect from raw signal via PreparedSignal
+        input_signal    = _extract_signal(body)
+        sampling_rate   = 500
         prepared        = PreparedSignal(input_signal, sampling_rate)
         r_peaks_sec     = (np.array(prepared.rpeaks["ECG_R_Peaks"]) / sampling_rate).tolist()
         r_arr           = np.array(r_peaks_sec)
         n_beats         = len(r_peaks_sec)
         zone_intervals  = prepared.zone_intervals
         zone_peak_times = prepared.zone_peak_times
-        valid_beats     = []
 
-    # RR-interval detection
-    rr = np.diff(r_arr)
-    z, median_rr, mad_rr = mad_stats(rr)
-    rr_flags = set(int(i + 1) for i in range(len(z)) if z[i] > sigma)
+        rr = np.diff(r_arr)
+        z, median_rr, mad_rr = mad_stats(rr)
+        rr_flags = set(int(i + 1) for i in range(len(z)) if z[i] > sigma)
+        scale = 1.4826 * mad_rr + 1e-9
+        rr_beat_details = [
+            {
+                "beat_idx":   int(i + 1),
+                "zone":       "ECG_R_Peaks",
+                "rr_interval": round(float(rr[i]), 4),
+                "z_score":    round(float(z[i]), 2),
+                "median_rr":  round(median_rr, 4),
+                "reason":     "RR interval outlier",
+            }
+            for i in range(len(z)) if z[i] > sigma
+        ]
 
-    scale = 1.4826 * mad_rr + 1e-9
-    rr_beat_details = [
-        {
-            "beat_idx": int(i + 1),
-            "zone": "ECG_R_Peaks",
-            "rr_interval": round(float(rr[i]), 4),
-            "prev_rr": round(float(rr[i - 1]), 4) if i > 0 else None,
-            "next_rr": round(float(rr[i + 1]), 4) if i < len(rr) - 1 else None,
-            "deviation": round(float(abs(rr[i] - median_rr)), 4),
-            "scale": round(float(scale), 4),
-            "z_score": round(float(z[i]), 2),
-            "median_rr": round(median_rr, 4),
-            "reason": "RR interval outlier",
-        }
-        for i in range(len(z)) if z[i] > sigma
-    ]
-
-    # Per-zone interval detection (P, Q, S, T + R independently)
-    zone_per_zone, zone_flagged = detect_by_zone_intervals(zone_intervals, sigma)
-    zone_beat_details = []
-    for zone, zdata in zone_per_zone.items():
-        for d in zdata.get("details", []):
-            zone_beat_details.append({
-                "beat_idx": d["beat_idx"],
-                "zone": zone,
+        zone_per_zone, zone_flagged = detect_by_zone_intervals(zone_intervals, sigma)
+        zone_beat_details = [
+            {
+                "beat_idx":   d["beat_idx"],
+                "zone":       zone,
                 "rr_interval": d["interval"],
-                "deviation": round(abs(d["interval"] - zdata["stats"]["median_interval"]), 4),
-                "scale": round(1.4826 * zdata["stats"]["mad"] + 1e-9, 4),
-                "z_score": d["z_score"],
-                "median_rr": d["median_interval"],
-                "reason": f"{zone} interval outlier",
-            })
+                "z_score":    d["z_score"],
+                "median_rr":  d["median_interval"],
+                "reason":     f"{zone} interval outlier",
+            }
+            for zone, zdata in zone_per_zone.items()
+            for d in zdata.get("details", [])
+        ]
 
-    all_artifact_indices = sorted(rr_flags | set(zone_flagged))
+        all_artifact_indices = sorted(rr_flags | set(zone_flagged))
+        beat_zone: dict[int, str] = {idx: "ECG_R_Peaks" for idx in rr_flags}
+        for zone, zdata in zone_per_zone.items():
+            for idx in zdata.get("flagged", []):
+                if idx not in beat_zone:
+                    beat_zone[idx] = zone
 
-    # Build a map: beat_idx → which zone to use for the highlight range.
-    # RR-flagged beats use R-peaks; zone-flagged beats use that zone's peaks.
-    # If a beat is flagged by multiple zones, prefer the first zone found.
-    beat_zone: dict[int, str] = {}
-    for idx in rr_flags:
-        beat_zone[idx] = "ECG_R_Peaks"
-    for zone, zdata in zone_per_zone.items():
-        for idx in zdata.get("flagged", []):
-            if idx not in beat_zone:
-                beat_zone[idx] = zone
+        artifact_time_ranges = []
+        for idx in all_artifact_indices:
+            zone       = beat_zone.get(idx, "ECG_R_Peaks")
+            peak_times = zone_peak_times.get(zone, {})
+            start = peak_times.get(idx - 1, float(r_arr[idx - 1]) if idx > 0 else 0.0)
+            end   = peak_times.get(idx, float(r_arr[idx]))
+            artifact_time_ranges.append([start, end])
 
-    # Use zone-aware time ranges for artifact highlighting
-    artifact_time_ranges = []
-    for idx in all_artifact_indices:
-        zone       = beat_zone.get(idx, "ECG_R_Peaks")
-        peak_times = zone_peak_times.get(zone, {})
-        start = peak_times.get(idx - 1, float(r_arr[idx - 1]) if idx > 0 else 0.0)
-        end   = peak_times.get(idx,     float(r_arr[idx]))
-        artifact_time_ranges.append([start, end])
+        beat_details = rr_beat_details + [d for d in zone_beat_details if d["beat_idx"] not in rr_flags]
+        result = _build_type_result(all_artifact_indices, n_beats, r_arr, [], [])
+        result["artifact_time_ranges"] = artifact_time_ranges
+        result["beat_details"]         = beat_details
+        result["zone_flags"]           = {k: v["flagged"] for k, v in zone_per_zone.items() if v["flagged"]}
+        result["zone_details"]         = {k: v for k, v in zone_per_zone.items() if v["flagged"]}
+        result["stats"] = {
+            "median_rr":   round(median_rr, 4),
+            "mad":         round(mad_rr, 4),
+            "scale":       round(float(scale), 4),
+            "sigma":       sigma,
+            "n_intervals": int(len(rr)),
+        }
 
-    beat_details       = rr_beat_details + [d for d in zone_beat_details if d["beat_idx"] not in rr_flags]
-    unreliable_indices = _get_unreliable_indices(valid_beats)
-
-    result = _build_type_result(all_artifact_indices, n_beats, r_arr, unreliable_indices, valid_beats)
-    # Override artifact_time_ranges with the zone-aware version computed above
-    result["artifact_time_ranges"] = artifact_time_ranges
-    result["beat_details"] = beat_details
-    result["zone_flags"]   = {k: v["flagged"] for k, v in zone_per_zone.items() if v["flagged"]}
-    result["zone_details"] = {k: v for k, v in zone_per_zone.items() if v["flagged"]}
-    result["stats"] = {
-        "median_rr":   round(median_rr, 4),
-        "mad":         round(mad_rr, 4),
-        "scale":       round(float(scale), 4),
-        "sigma":       sigma,
-        "n_intervals": int(len(rr)),
-    }
-    n_flagged = len(all_artifact_indices)
+    n_flagged = sum(1 for f in result["flags"] if f == FLAG_ARTIFACT)
     app.logger.info(f"Rhythm artifact detection: {n_flagged}/{n_beats} beats flagged (sigma={sigma})")
     return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
 
@@ -970,12 +1021,14 @@ def detect_artifacts_segment():
     beats = _extract_beats_from_body(body)
 
     sampling_rate = 500
+    matrix_indices = None  # None = PreparedSignal path (legacy sequential mapping)
     if beats:
         prep = _prepare_from_beats(input_signal, beats, sampling_rate)
         r_peaks_sec        = prep['r_peaks_sec']
         r_arr              = prep['r_arr']
         n_beats            = prep['n_beats']
         wave_matrices_data = [prep['matrix_P_wave'], prep['matrix_QRS'], prep['matrix_T_wave']]
+        matrix_indices     = prep['matrix_indices']
         valid_beats        = [b for b in beats if not b.get('skipped') and b.get('r') is not None]
     else:
         prepared           = PreparedSignal(input_signal, sampling_rate)
@@ -1015,11 +1068,32 @@ def detect_artifacts_segment():
             "n_beats":     len(matrix),
         }
 
-        m      = z > sigma
-        length = min(len(m), n_beats)
-        seg_mask[:length] |= m[:length]
+        if matrix_indices is not None:
+            # beats path: matrix_indices[i] maps matrix entry i → valid_beats index
+            for mat_i, vb_i in enumerate(matrix_indices):
+                if mat_i < len(z) and z[mat_i] > sigma and vb_i < n_beats:
+                    seg_mask[vb_i] = True
+        else:
+            # PreparedSignal path: legacy sequential mapping
+            m      = z > sigma
+            length = min(len(m), n_beats)
+            seg_mask[:length] |= m[:length]
 
     artifact_indices = np.where(seg_mask)[0].tolist()
+
+    # Remap wave z/rmse arrays to be indexed by valid_beats position.
+    # In the PreparedSignal path they already are (legacy sequential mapping).
+    # In the beats path, wave_z[label] is indexed by matrix position; remap via matrix_indices.
+    if matrix_indices is not None:
+        for label in list(wave_z.keys()):
+            z_by_vb   = np.full(n_beats, np.nan)
+            rmse_by_vb = np.full(n_beats, np.nan)
+            for mat_i, vb_i in enumerate(matrix_indices):
+                if mat_i < len(wave_z[label]) and vb_i < n_beats:
+                    z_by_vb[vb_i]    = wave_z[label][mat_i]
+                    rmse_by_vb[vb_i] = wave_rmse[label][mat_i]
+            wave_z[label]    = z_by_vb
+            wave_rmse[label] = rmse_by_vb
 
     # Wave boundary lookup from beats for precise time ranges
     wave_bounds: dict[int, dict] = {}
@@ -1042,9 +1116,10 @@ def detect_artifacts_segment():
         for label in wave_labels:
             if label not in wave_z or beat_idx >= len(wave_z[label]):
                 continue
-            if wave_z[label][beat_idx] > sigma:
+            zv = wave_z[label][beat_idx]
+            if not np.isnan(zv) and zv > sigma:
                 waves_flagged.append(label)
-                z_scores[label]    = round(float(wave_z[label][beat_idx]), 2)
+                z_scores[label]    = round(float(zv), 2)
                 rmse_values[label] = round(float(wave_rmse[label][beat_idx]), 4)
         beat_details.append({
             "beat_idx":      beat_idx,
