@@ -11,6 +11,7 @@ from scipy.signal import resample
 
 from artifacts_config import ArtifactsConfig
 from segment_artifacts_config import SegmentArtifactsConfig
+from physio_artifact_config import PhysioArtifactConfig
 
 
 def show_plot(title, t_data, sig_data):
@@ -319,7 +320,8 @@ class Simulation:
         return final_seq['points'], meta
 
     def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig, sampling_rate: int = 500,
-                                mean_6zones=None, var_6zones=None, variance_scale: float = 0.3):
+                                mean_6zones=None, var_6zones=None, variance_scale: float = 0.3,
+                                physio_artifacts: list[PhysioArtifactConfig] | None = None):
         def to_matrix(time_series):
             values = time_series[1]
             matrix = list()
@@ -439,6 +441,14 @@ class Simulation:
                 "cfg": c,
             }
 
+        # Physio artifact index: cycle_ix → PhysioArtifactConfig
+        physio_idx: dict[int, PhysioArtifactConfig] = {}
+        for pa in (physio_artifacts or []):
+            places = pick_random_unique_n(cycles_count, pa.count_or_pos) if not pa.exact_placement else [pa.count_or_pos - 1]
+            for place in [int(p) for p in places]:
+                if 0 <= place < cycles_count:
+                    physio_idx[place] = pa
+
         # points = list()
         # last_time = 0
         final_seq = {
@@ -454,10 +464,21 @@ class Simulation:
             final_seq['last_time'] += len(v) / sampling_rate
 
         for cycle_ix in range(cycles_count):
+            physio_art = physio_idx.get(cycle_ix)
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
                 rhythm_v = float(raw_rhythm[cycle_ix % available_rhythm])
+
+                if physio_art and physio_art.artifact_type == 'rhythm':
+                    if segments_count == 6:
+                        # Only stretch the TP zone (diastole before the beat) so that
+                        # exactly one RR interval is affected. Scaling all zones would
+                        # bleed into both the preceding and following RR intervals.
+                        if segment_ix == 0:
+                            rhythm_v *= physio_art.rr_scale
+                    else:
+                        rhythm_v *= physio_art.rr_scale
 
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
@@ -499,25 +520,29 @@ class Simulation:
                 new_duration = max(1, int(segment_duration * rhythm_ratio))
                 t = np.arange(new_duration, dtype=float) / sampling_rate
 
-                # Flat/isoelectric zones (TP=0, PQ=2, ST=4) get strongly reduced noise;
-                # active waveform zones (P=1, QRS=3, T=5) keep the full scale.
                 ZONE_NOISE_FACTORS = [0.05, 0.6, 0.1, 1.0, 0.05, 0.6]
                 zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < 6 else 1.0
 
+                # Shape artifact: boost noise scale for this cycle
+                effective_variance_scale = variance_scale
+                if physio_art and physio_art.artifact_type == 'shape':
+                    effective_variance_scale *= physio_art.noise_scale
+
                 n = len(mean_data)
                 if n < 20:
-                    # Short zone — use pure mean, no noise
                     ecg_signal = mean_data
                 else:
-                    ZONE_NOISE_FACTORS = [0.05, 0.6, 0.1, 1.0, 0.05, 0.6]
-                    zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < 6 else 1.0
-                    std = variance_scale * zone_factor * np.sqrt(np.abs(variance_data))
+                    std = effective_variance_scale * zone_factor * np.sqrt(np.abs(variance_data))
                     noise = np.random.normal(0, std)
                     wl = min(max(7, (n // 2) | 1), 101)
                     if wl % 2 == 0:
                         wl -= 1
                     noise = savgol_filter(noise, window_length=wl, polyorder=2)
                     ecg_signal = mean_data + noise
+
+                # Amplitude artifact: scale the whole zone signal
+                if physio_art and physio_art.artifact_type == 'amplitude':
+                    ecg_signal = ecg_signal * physio_art.amplitude_scale
 
                 if new_duration != len(ecg_signal):
                     x_old = np.linspace(0, 1, len(ecg_signal))

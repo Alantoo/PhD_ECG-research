@@ -15,6 +15,7 @@ from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.exceptions import NotFound
 
 from artifacts_config import ArtifactsConfig
+from physio_artifact_config import PhysioArtifactConfig
 from classification_signal import EnsembleSignalClassifier
 from gen_sig import to_np_array
 from get_config.ecg_config import ECGConfig
@@ -1379,10 +1380,22 @@ def simulate_ecg_from_math_stats():
     var_6zones     = to_np_array_on_demand(body['variance_6zones']) if body.get('variance_6zones') else None
     variance_scale = float(body['variance_scale']) if body.get('variance_scale') is not None else 0.3
 
+    physio_artifacts = []
+    for pa in (body.get('physio_artifacts') or []):
+        physio_artifacts.append(PhysioArtifactConfig(
+            pa['type'],
+            pa['count_or_pos'],
+            pa.get('exact_placement', False),
+            pa.get('rr_scale'),
+            pa.get('amplitude_scale'),
+            pa.get('noise_scale'),
+        ))
+
     sim = Simulation()
     generated, meta = sim.gen_ecg_from_math_stats(
         segments_count, mean_data, variance_data, rhythm_data, cfg,
         mean_6zones=mean_6zones, var_6zones=var_6zones, variance_scale=variance_scale,
+        physio_artifacts=physio_artifacts or None,
     )
 
     # intervals_cache[key] = data
