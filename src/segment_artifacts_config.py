@@ -6,6 +6,6 @@ class SegmentArtifactsConfig:
         self.count_or_pos = int(count_or_pos)
         self.exact_placement = exact_placement is True
         # Optional render-time overrides
-        self.duration   = float(duration)   if duration   is not None else None  # seconds
+        self.duration   = float(duration) / 1000 if duration is not None else None  # UI sends ms, store as seconds
         self.min_height = float(min_height) if min_height is not None else None
         self.max_height = float(max_height) if max_height is not None else None

@@ -363,6 +363,10 @@ def generate_mat_stats():
 
     prepared  = PreparedSignal(input, 500, delineation_method='dwt', r_peak_method='neurokit')
     stats     = prepared.get_stats()
+    mean_6z, var_6z = prepared.get_6zone_stats()
+    if mean_6z is not None:
+        stats['mean_6zones']     = mean_6z
+        stats['variance_6zones'] = var_6z
     json_data = json.dumps(stats, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
@@ -1346,13 +1350,13 @@ def simulate_ecg():
 @app.post('/v2/modelling/math_stats')
 def simulate_ecg_from_math_stats():
     body = request.get_json()
-    count = 0
+    count = int(body.get('cycles_count') or 0)
     segments_count = 5
     segments = list()
     if body is not None and 'artifacts' in body:
         artifacts = body['artifacts']
         if artifacts is not None:
-            if 'count' in artifacts:
+            if 'count' in artifacts and not count:
                 count = int(artifacts['count'])
             if 'segments' in artifacts:
                 segments = artifacts['segments']
@@ -1371,8 +1375,15 @@ def simulate_ecg_from_math_stats():
         segments_count = 5
         rhythm_data    = to_np_array_on_demand(body['rhythm'])
 
+    mean_6zones    = to_np_array_on_demand(body['mean_6zones'])     if body.get('mean_6zones')     else None
+    var_6zones     = to_np_array_on_demand(body['variance_6zones']) if body.get('variance_6zones') else None
+    variance_scale = float(body['variance_scale']) if body.get('variance_scale') is not None else 0.3
+
     sim = Simulation()
-    generated, meta = sim.gen_ecg_from_math_stats(segments_count, mean_data, variance_data, rhythm_data, cfg)
+    generated, meta = sim.gen_ecg_from_math_stats(
+        segments_count, mean_data, variance_data, rhythm_data, cfg,
+        mean_6zones=mean_6zones, var_6zones=var_6zones, variance_scale=variance_scale,
+    )
 
     # intervals_cache[key] = data
     result = {

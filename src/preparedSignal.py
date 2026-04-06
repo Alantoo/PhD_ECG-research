@@ -283,6 +283,48 @@ class PreparedSignal:
         )
         return matrices, rhythm_matrix
 
+    def get_6zone_stats(self):
+        """Per-zone mean and variance for 6-zone modelling.
+
+        Returns (mean_points, variance_points) where each is a list of [index, value]
+        pairs with zones 0-5 concatenated in order.  The split boundaries are
+        recoverable from rhythm_6zones mean durations (same ordering as get_6zone_matrices).
+
+        Returns (None, None) if the signal has no valid 6-zone cycles.
+        """
+        matrices, _ = self.get_6zone_matrices()
+        if not matrices[0]:
+            return None, None
+
+        mean_concat = []
+        var_concat  = []
+
+        for z in range(6):
+            zone_arrays = matrices[z]
+            if not zone_arrays:
+                continue
+            target_size = len(zone_arrays[0])
+            normalized  = []
+            for arr in zone_arrays:
+                arr = np.array(arr, dtype=float)
+                if len(arr) == target_size:
+                    normalized.append(arr)
+                elif len(arr) >= 2:
+                    f = interp.interp1d(np.arange(len(arr)), arr)
+                    normalized.append(f(np.linspace(0, len(arr) - 1, target_size)))
+                else:
+                    normalized.append(np.full(target_size, arr[0] if len(arr) else 0.0))
+
+            mat       = np.array(normalized)          # (n_cycles, target_size)
+            mean_concat.extend(np.mean(mat, axis=0).tolist())
+            var_concat.extend( np.var( mat, axis=0).tolist())
+
+        n = len(mean_concat)
+        return (
+            [[i, mean_concat[i]] for i in range(n)],
+            [[i, var_concat[i]]  for i in range(n)],
+        )
+
     def get_6zone_rhythm_points(self):
         """
         Returns rhythm as interleaved 6-zone durations (samples) for use with

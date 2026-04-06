@@ -148,23 +148,56 @@ def compute_morphology(beat, amplitudes, intervals, baseline):
 
 
 def compute_template_correlations(beats, sig, sampling_rate, time_offset, fixed_len=200):
-    """Pearson correlation of each beat's full waveform (p_on→t_off) vs the median template."""
-    valid_idxs = []
-    resampled  = []
+    """Pearson correlation of each beat vs the median template.
 
-    for i, b in enumerate(beats):
+    Beats are resampled with R-peak alignment: the pre-R (p_on→r) and post-R
+    (r→t_off) halves are each interpolated independently to fixed sub-lengths.
+    This ensures the QRS spike always lands at the same sample position regardless
+    of beat-to-beat PR interval variation, preventing timing misalignment from
+    producing false dissimilarity.  Falls back to simple full-beat interpolation
+    when the R peak is unavailable.
+    """
+    pre_len  = fixed_len // 3       # p_on → r  (~PR + QRS onset)
+    post_len = fixed_len - pre_len  # r    → t_off
+
+    def _resample_aligned(b):
         p_on  = b.get('p_on')
         t_off = b.get('t_off')
+        r     = b.get('r')
         if p_on is None or t_off is None or float(t_off) <= float(p_on):
-            continue
-        s   = max(0, int(round((float(p_on)  - time_offset) * sampling_rate)))
-        e   = max(0, int(round((float(t_off) - time_offset) * sampling_rate)))
-        seg = sig[s:e]
-        if len(seg) < 4:
-            continue
-        f = interp1d(np.linspace(0.0, 1.0, len(seg)), seg, kind='linear')
-        valid_idxs.append(i)
-        resampled.append(f(np.linspace(0.0, 1.0, fixed_len)))
+            return None
+        if r is not None and float(p_on) < float(r) < float(t_off):
+            # Split at R peak
+            s_pre  = max(0, int(round((float(p_on) - time_offset) * sampling_rate)))
+            s_r    = max(0, int(round((float(r)    - time_offset) * sampling_rate)))
+            s_post = max(0, int(round((float(t_off) - time_offset) * sampling_rate)))
+            pre  = sig[s_pre:s_r]
+            post = sig[s_r:s_post]
+            if len(pre) < 2 or len(post) < 2:
+                return None
+            f_pre  = interp1d(np.linspace(0.0, 1.0, len(pre)),  pre,  kind='linear')
+            f_post = interp1d(np.linspace(0.0, 1.0, len(post)), post, kind='linear')
+            return np.concatenate([
+                f_pre( np.linspace(0.0, 1.0, pre_len)),
+                f_post(np.linspace(0.0, 1.0, post_len)),
+            ])
+        else:
+            # Fallback: no R peak — simple full-beat interpolation
+            s = max(0, int(round((float(p_on)  - time_offset) * sampling_rate)))
+            e = max(0, int(round((float(t_off) - time_offset) * sampling_rate)))
+            seg = sig[s:e]
+            if len(seg) < 4:
+                return None
+            f = interp1d(np.linspace(0.0, 1.0, len(seg)), seg, kind='linear')
+            return f(np.linspace(0.0, 1.0, fixed_len))
+
+    valid_idxs = []
+    resampled  = []
+    for i, b in enumerate(beats):
+        vec = _resample_aligned(b)
+        if vec is not None:
+            valid_idxs.append(i)
+            resampled.append(vec)
 
     if len(resampled) < 2:
         return {}

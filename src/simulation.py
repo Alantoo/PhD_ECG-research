@@ -204,7 +204,8 @@ class Simulation:
                 mean_rhythm = float(mean_time_rhythm[pidx])
                 time_rhythm.append(rhythm_v / mean_rhythm)
 
-        cycles_count = min(len(rhythm_matrix[0]), cfg.cycles_count if cfg.cycles_count > 0 else 10)
+        available_rhythm = len(rhythm_matrix[0])
+        cycles_count = cfg.cycles_count if cfg.cycles_count > 0 else 10
 
         segments_count = len(interpolated_matrix)
         artifacts_idx = dict()
@@ -224,32 +225,29 @@ class Simulation:
         }
 
         def append_seg_point(t: list[float], v: list[float]):
-            last_tval = 0
             for i in range(len(v)):
                 time = t[i] + final_seq['last_time']
-                value = v[i]
-                last_tval = time
-                final_seq['points'].append([time, value])
+                final_seq['points'].append([time, v[i]])
 
-            final_seq['last_time'] = last_tval
+            final_seq['last_time'] += len(v) / sampling_rate
 
         for cycle_ix in range(cycles_count):
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
-                rhythm_v = float(raw_rhythm[cycle_ix])
+                rhythm_v = float(raw_rhythm[cycle_ix % available_rhythm])
 
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
                     max_ts = segment_cfg.points[-1][0]
 
-                    # X-axis: scale to explicit duration (seconds→samples) or mean zone duration
+                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v
                     if segment_cfg.duration is not None and segment_cfg.duration > 0:
                         target_samples = segment_cfg.duration * sampling_rate
                         rhythm_ratio = target_samples / max_ts if max_ts > 0 else 1.0
                     else:
-                        rhythm_ratio = mean_rhythm / max_ts if max_ts > 0 else 1.0
+                        rhythm_ratio = rhythm_v / max_ts if max_ts > 0 else 1.0
 
                     scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
 
@@ -279,39 +277,17 @@ class Simulation:
                 variance_data = variance_matrix[segment_ix]
                 variance_time = [i for i in range(len(variance_data))]
 
-                # Інтерполяція для приведення до спільного часу
                 segment_duration = len(raw_data)
                 rhythm_ratio = rhythm_v / mean_rhythm
-                new_duration = int(segment_duration * rhythm_ratio)
-                t = np.linspace(0, new_duration, segment_duration)  # Спільний часовий інтервал
+                new_duration = max(1, int(segment_duration * rhythm_ratio))
+                t = np.arange(new_duration, dtype=float) / sampling_rate
 
-                # mean_interp = interp1d(mean_time, mean_data, kind='nearest', fill_value="extrapolate")
-                # variance_interp = interp1d(variance_time, variance_data, kind='nearest', fill_value="extrapolate")
-
-                # Отримуємо значення на всьому часовому інтервалі
-                # mean = resample(mean_data, new_duration)
-                # variance = resample(variance_data, new_duration)
-                # mean = mean_interp(t)
-                # variance = variance_interp(t)
-
-                # Генерація циклічного сигналу
                 direction = 1
                 if bool(random.getrandbits(1)):
                     direction = -1
 
                 ecg_signal = mean_data + direction * np.sqrt(np.abs(variance_data))
-                # rhythm = 1
-                # ecg_signal = mean + np.sin(2 * np.pi * rhythm * t) + np.random.normal(0, np.sqrt(variance), len(t))
-
-                # show_plot(f"Mean {segment_ix}", mean_time, mean_data)
-                # show_plot(f"Mean {segment_ix} 2", t, mean)
-                # show_plot(f"Variance {segment_ix}", variance_time, variance_data)
-                # show_plot(f"Variance {segment_ix} 2", t, variance)
-                # show_plot(f"Generated {segment_ix}", t, ecg_signal)
-
-                # postprocessed = savgol_filter(ecg_signal, window_length=min(13, len(ecg_signal)), polyorder=3)
-                postprocessed = ecg_signal
-                # show_plot(f"Generated {segment_ix}", t, postprocessed)
+                postprocessed = resample(ecg_signal, new_duration)
                 append_seg_point(t, postprocessed)
                 # last_tval = 0
                 # for i in range(len(postprocessed)):
@@ -342,7 +318,8 @@ class Simulation:
 
         return final_seq['points'], meta
 
-    def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig, sampling_rate: int = 500):
+    def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig, sampling_rate: int = 500,
+                                mean_6zones=None, var_6zones=None, variance_scale: float = 0.3):
         def to_matrix(time_series):
             values = time_series[1]
             matrix = list()
@@ -358,10 +335,100 @@ class Simulation:
             values = time_series[1]
             return [list(values[ix::segments_count]) for ix in range(segments_count)]
 
-        mean_matrix, variance_matrix, rhythm_matrix = to_matrix(mean), to_matrix(variance), to_rhythm_matrix(rhythm)
+        def to_matrix_6zone(time_series, mean_durations):
+            """Split mean/variance for the 6-zone anatomical model.
+
+            Zone 0 (TP) is a flat diastolic baseline — it is NOT captured in the
+            mean beat (which starts at P_on).  Zones 1-5 (P, PQ, QRS, ST, T) are
+            proportional slices of the 500-sample normalised beat, sized according
+            to each zone's mean duration.
+            """
+            values = time_series[1]
+            n = len(values)
+
+            non_tp_durs = mean_durations[1:]          # zones 1-5
+            total_non_tp = sum(non_tp_durs)
+
+            if total_non_tp <= 0:
+                return to_matrix(time_series)         # fallback to equal split
+
+            # Zone 0: flat TP baseline at the mean level of the beat start
+            tp_size = max(4, int(round(mean_durations[0])))
+            baseline = float(np.mean(values[:max(1, n // 10)]))
+            matrix = [np.full(tp_size, baseline)]
+
+            # Zones 1-5: proportional slices of the normalised mean beat
+            offset = 0
+            for z, dur in enumerate(non_tp_durs):
+                if z < len(non_tp_durs) - 1:
+                    size = max(4, int(round(dur / total_non_tp * n)))
+                    matrix.append(np.array(values[offset:offset + size]))
+                    offset += size
+                else:
+                    matrix.append(np.array(values[offset:]))   # last zone: remainder
+
+            return matrix
+
+        def to_variance_6zone(time_series, mean_durations):
+            """Same proportional split as to_matrix_6zone, but zone 0 (TP) gets
+            near-zero variance — TP is a flat diastolic segment."""
+            values = time_series[1]
+            n = len(values)
+
+            non_tp_durs = mean_durations[1:]
+            total_non_tp = sum(non_tp_durs)
+
+            if total_non_tp <= 0:
+                return to_matrix(time_series)
+
+            tp_size = max(4, int(round(mean_durations[0])))
+            matrix = [np.full(tp_size, 1e-6)]          # near-flat variance for TP
+
+            offset = 0
+            for z, dur in enumerate(non_tp_durs):
+                if z < len(non_tp_durs) - 1:
+                    size = max(4, int(round(dur / total_non_tp * n)))
+                    matrix.append(np.array(values[offset:offset + size]))
+                    offset += size
+                else:
+                    matrix.append(np.array(values[offset:]))
+
+            return matrix
+
+        def to_split_from_6zone(time_series, mean_durations):
+            """Split pre-computed per-zone concatenated data into a zone matrix.
+
+            The concatenated array was produced by get_6zone_stats(), which writes
+            zones 0-5 sequentially, each sized according to the actual zone arrays.
+            We recover the sizes from mean_durations (same ordering as rhythm_6zones).
+            """
+            values = time_series[1]
+            matrix = []
+            offset = 0
+            for d in mean_durations:
+                size = max(4, int(round(d)))
+                chunk = np.array(values[offset:offset + size], dtype=float)
+                if len(chunk) == 0:
+                    chunk = np.zeros(size)
+                matrix.append(chunk)
+                offset += size
+            return matrix
+
+        rhythm_matrix = to_rhythm_matrix(rhythm)
         mean_time_rhythm = [np.mean(i) for i in rhythm_matrix]
 
-        cycles_count = min(len(rhythm_matrix[0]), cfg.cycles_count if cfg.cycles_count > 0 else 10)
+        if segments_count == 6 and mean_6zones is not None and var_6zones is not None:
+            mean_matrix     = to_split_from_6zone(mean_6zones,   mean_time_rhythm)
+            variance_matrix = to_split_from_6zone(var_6zones,    mean_time_rhythm)
+        elif segments_count == 6:
+            mean_matrix     = to_matrix_6zone(mean,     mean_time_rhythm)
+            variance_matrix = to_variance_6zone(variance, mean_time_rhythm)
+        else:
+            mean_matrix     = to_matrix(mean)
+            variance_matrix = to_matrix(variance)
+
+        available_rhythm = len(rhythm_matrix[0])
+        cycles_count = cfg.cycles_count if cfg.cycles_count > 0 else 10
 
         artifacts_idx = dict()
         for c in cfg.segment_cfg:
@@ -380,31 +447,29 @@ class Simulation:
         }
 
         def append_seg_point(t: list[float], v: list[float]):
-            last_tval = 0
             for i in range(len(v)):
                 time = t[i] + final_seq['last_time']
-                value = v[i]
-                last_tval = time
-                final_seq['points'].append([time, value])
+                final_seq['points'].append([time, v[i]])
 
-            final_seq['last_time'] = last_tval
+            final_seq['last_time'] += len(v) / sampling_rate
 
         for cycle_ix in range(cycles_count):
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
-                rhythm_v = float(raw_rhythm[cycle_ix])
+                rhythm_v = float(raw_rhythm[cycle_ix % available_rhythm])
 
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
                     max_ts = segment_cfg.points[-1][0]
 
+                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v
                     if segment_cfg.duration is not None and segment_cfg.duration > 0:
                         target_samples = segment_cfg.duration * sampling_rate
                         rhythm_ratio = target_samples / max_ts if max_ts > 0 else 1.0
                     else:
-                        rhythm_ratio = mean_rhythm / max_ts if max_ts > 0 else 1.0
+                        rhythm_ratio = rhythm_v / max_ts if max_ts > 0 else 1.0
 
                     scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
 
@@ -429,20 +494,37 @@ class Simulation:
                 mean_data = mean_matrix[segment_ix]
                 variance_data = variance_matrix[segment_ix]
 
-                # Інтерполяція для приведення до спільного часу
                 segment_duration = len(mean_data)
                 rhythm_ratio = rhythm_v / mean_rhythm
-                new_duration = int(segment_duration * rhythm_ratio)
-                t = np.linspace(0, new_duration, segment_duration)  # Спільний часовий інтервал
+                new_duration = max(1, int(segment_duration * rhythm_ratio))
+                t = np.arange(new_duration, dtype=float) / sampling_rate
 
-                # Генерація циклічного сигналу
-                direction = 1
-                if bool(random.getrandbits(1)):
-                    direction = -1
+                # Flat/isoelectric zones (TP=0, PQ=2, ST=4) get strongly reduced noise;
+                # active waveform zones (P=1, QRS=3, T=5) keep the full scale.
+                ZONE_NOISE_FACTORS = [0.05, 0.6, 0.1, 1.0, 0.05, 0.6]
+                zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < 6 else 1.0
 
-                ecg_signal = mean_data + direction * np.sqrt(np.abs(variance_data))
+                n = len(mean_data)
+                if n < 20:
+                    # Short zone — use pure mean, no noise
+                    ecg_signal = mean_data
+                else:
+                    ZONE_NOISE_FACTORS = [0.05, 0.6, 0.1, 1.0, 0.05, 0.6]
+                    zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < 6 else 1.0
+                    std = variance_scale * zone_factor * np.sqrt(np.abs(variance_data))
+                    noise = np.random.normal(0, std)
+                    wl = min(max(7, (n // 2) | 1), 101)
+                    if wl % 2 == 0:
+                        wl -= 1
+                    noise = savgol_filter(noise, window_length=wl, polyorder=2)
+                    ecg_signal = mean_data + noise
 
-                postprocessed = ecg_signal
+                if new_duration != len(ecg_signal):
+                    x_old = np.linspace(0, 1, len(ecg_signal))
+                    x_new = np.linspace(0, 1, new_duration)
+                    postprocessed = np.interp(x_new, x_old, ecg_signal)
+                else:
+                    postprocessed = ecg_signal
                 append_seg_point(t, postprocessed)
 
         def stats_matrix_to_points(matrix):
