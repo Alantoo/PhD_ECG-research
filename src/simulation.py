@@ -241,16 +241,24 @@ class Simulation:
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
-                    max_ts = segment_cfg.points[-1][0]
+                    # Normalize X to start from 0: points may come from a project signal
+                    # with absolute timestamps (e.g. [2.5, 2.502, ...]) rather than relative
+                    # ones. Without normalization the first ~N ms of the zone is a straight-line
+                    # gap and the custom shape only occupies the tail end of the slot.
+                    first_x = segment_cfg.points[0][0] if segment_cfg.points else 0
+                    rel_points = [[p[0] - first_x, p[1]] for p in segment_cfg.points]
+                    max_ts = rel_points[-1][0] if rel_points else 0
 
-                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v
+                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v.
+                    # rhythm_v is in samples; artifact points X-axis is in seconds — convert.
+                    rhythm_duration_sec = rhythm_v / sampling_rate
                     if segment_cfg.duration is not None and segment_cfg.duration > 0:
-                        target_samples = segment_cfg.duration * sampling_rate
-                        rhythm_ratio = target_samples / max_ts if max_ts > 0 else 1.0
+                        target_duration_sec = segment_cfg.duration
+                        rhythm_ratio = target_duration_sec / max_ts if max_ts > 0 else 1.0
                     else:
-                        rhythm_ratio = rhythm_v / max_ts if max_ts > 0 else 1.0
+                        rhythm_ratio = rhythm_duration_sec / max_ts if max_ts > 0 else 1.0
 
-                    scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
+                    scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in rel_points]
 
                     # Y-axis: remap amplitude to [min_height, max_height]
                     if segment_cfg.min_height is not None and segment_cfg.max_height is not None:
@@ -268,7 +276,13 @@ class Simulation:
                             scaled_points = [[p[0], mid] for p in scaled_points]
 
                     t, v = zip(*scaled_points)
+                    prev_last_time = final_seq['last_time']
                     append_seg_point(t, v)
+                    # Override: advance last_time by actual scaled duration (t[-1] + one sample),
+                    # not by len(v)/sampling_rate (the unscaled point count). Without this,
+                    # when rhythm_ratio ≠ 1 the next zone starts at the wrong time, making
+                    # the time axis non-monotonic and creating overlapping or gapped zones.
+                    final_seq['last_time'] = prev_last_time + t[-1] + 1.0 / sampling_rate
                     continue
 
                 raw_data = interpolated_matrix[segment_ix][cycle_ix]
@@ -483,16 +497,21 @@ class Simulation:
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
-                    max_ts = segment_cfg.points[-1][0]
+                    # Normalize X to start from 0 (same reason as gen_ecg_from_matrix).
+                    first_x = segment_cfg.points[0][0] if segment_cfg.points else 0
+                    rel_points = [[p[0] - first_x, p[1]] for p in segment_cfg.points]
+                    max_ts = rel_points[-1][0] if rel_points else 0
 
-                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v
+                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v.
+                    # rhythm_v is in samples; artifact points X-axis is in seconds — convert.
+                    rhythm_duration_sec = rhythm_v / sampling_rate
                     if segment_cfg.duration is not None and segment_cfg.duration > 0:
-                        target_samples = segment_cfg.duration * sampling_rate
-                        rhythm_ratio = target_samples / max_ts if max_ts > 0 else 1.0
+                        target_duration_sec = segment_cfg.duration
+                        rhythm_ratio = target_duration_sec / max_ts if max_ts > 0 else 1.0
                     else:
-                        rhythm_ratio = rhythm_v / max_ts if max_ts > 0 else 1.0
+                        rhythm_ratio = rhythm_duration_sec / max_ts if max_ts > 0 else 1.0
 
-                    scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in segment_cfg.points]
+                    scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in rel_points]
 
                     if segment_cfg.min_height is not None and segment_cfg.max_height is not None:
                         y_vals = [p[1] for p in scaled_points]
@@ -509,7 +528,9 @@ class Simulation:
                             scaled_points = [[p[0], mid] for p in scaled_points]
 
                     t, v = zip(*scaled_points)
+                    prev_last_time = final_seq['last_time']
                     append_seg_point(t, v)
+                    final_seq['last_time'] = prev_last_time + t[-1] + 1.0 / sampling_rate
                     continue
 
                 mean_data = mean_matrix[segment_ix]

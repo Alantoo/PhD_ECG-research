@@ -153,11 +153,14 @@ class PreparedSignal:
         }
 
         sig_arr = np.array(self.signal)
+        sig_len = len(sig_arr)
 
         def extract(on_sec, off_sec):
             s = int(float(on_sec) * self.sampling_rate)
             e = int(float(off_sec) * self.sampling_rate)
-            return sig_arr[s:e] if e > s else None
+            if s < 0 or e > sig_len or e <= s:
+                return None
+            return sig_arr[s:e]
 
         matrix_P_wave, matrix_QRS, matrix_T_wave, matrix_beat = [], [], [], []
         skipped_nan = 0
@@ -224,11 +227,14 @@ class PreparedSignal:
         rhythm_matrix[z] is a list of ints (duration in samples per cycle).
         """
         sig_arr = np.array(self.signal)
+        sig_len = len(sig_arr)
 
         def extract(on_sec, off_sec):
             s = int(float(on_sec) * self.sampling_rate)
             e = int(float(off_sec) * self.sampling_rate)
-            return sig_arr[s:e] if e > s else None
+            if s < 0 or e > sig_len or e <= s:
+                return None
+            return sig_arr[s:e]
 
         n         = len(self.ECG_P_Onsets)
         p_on_arr  = np.array(self.ECG_P_Onsets,  dtype=float)
@@ -354,7 +360,27 @@ class PreparedSignal:
         return interp_matrix, mod_sampling_rate
 
     def get_stats(self):
-        interp_matrix_all, _ = self.get_interpolated_matrix()
+        # Build full-cycle beats as P → PQ → QRS → ST → T → TP so that the
+        # mean waveform includes the trailing TP baseline.
+        # Zone 0 of beat i is T_off[i-1]→P_on[i], so the TP that follows beat
+        # i is zone 0 of beat i+1 — hence we pair zones 1-5 of beat i with
+        # zone 0 of beat i+1, yielding n_cycles-1 complete cycles.
+        # Fall back to the old matrix_beat path if 6-zone extraction fails.
+        matrices, _ = self.get_6zone_matrices()
+        mod_sampling_rate = int(self.sampling_rate * self.multiplier)
+        if matrices[0]:
+            n_cycles = min(len(m) for m in matrices) - 1  # need next beat's zone 0
+            interp_matrix_all = []
+            for i in range(n_cycles):
+                beat = np.concatenate(
+                    [matrices[z][i] for z in range(1, 6)] + [matrices[0][i + 1]]
+                )
+                f = interp.interp1d(np.arange(beat.size), beat)
+                interp_matrix_all.append(
+                    f(np.linspace(0, beat.size - 1, mod_sampling_rate)).tolist()
+                )
+        else:
+            interp_matrix_all, _ = self.get_interpolated_matrix()
 
         m_m = np.mean(interp_matrix_all, 1)
 
