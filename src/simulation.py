@@ -429,13 +429,28 @@ class Simulation:
                 "cfg": c,
             }
 
-        # Physio artifact index: cycle_ix → PhysioArtifactConfig
-        physio_idx: dict[int, PhysioArtifactConfig] = {}
+        # Physio artifact index: cycle_ix → (config, effective_zones)
+        # effective_zones: None = all zones (default), list[int] = specific zones to affect
+        physio_idx: dict[int, tuple[PhysioArtifactConfig, list[int] | None]] = {}
         for pa in (physio_artifacts or []):
-            places = pick_random_unique_n(cycles_count, pa.count_or_pos) if not pa.exact_placement else [pa.count_or_pos - 1]
-            for place in [int(p) for p in places]:
-                if 0 <= place < cycles_count:
-                    physio_idx[place] = pa
+            places = (pick_random_unique_n(cycles_count, pa.count_or_pos)
+                      if not pa.exact_placement else [pa.count_or_pos - 1])
+            places = [int(p) for p in places if 0 <= int(p) < cycles_count]
+
+            # For fixed random strategy draw the zone once; reuse for all affected cycles.
+            fixed_zone: list[int] | None = None
+            if pa.target_zones == 'random' and pa.random_zone_strategy == 'fixed':
+                fixed_zone = [random.randint(0, segments_count - 1)]
+
+            for place in places:
+                if pa.target_zones is None:
+                    effective_zones = None
+                elif pa.target_zones == 'random':
+                    effective_zones = (fixed_zone if pa.random_zone_strategy == 'fixed'
+                                       else [random.randint(0, segments_count - 1)])
+                else:
+                    effective_zones = [int(z) for z in pa.target_zones]
+                physio_idx[place] = (pa, effective_zones)
 
         # points = list()
         # last_time = 0
@@ -452,20 +467,25 @@ class Simulation:
             final_seq['last_time'] += len(v) / sampling_rate
 
         for cycle_ix in range(cycles_count):
-            physio_art = physio_idx.get(cycle_ix)
+            physio_entry = physio_idx.get(cycle_ix)
+            physio_art   = physio_entry[0] if physio_entry else None
+            physio_zones = physio_entry[1] if physio_entry else None  # None = all zones
+
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
                 rhythm_v = float(raw_rhythm[cycle_ix % available_rhythm])
 
                 if physio_art and physio_art.artifact_type == 'rhythm':
-                    if segments_count == 6:
-                        # Only stretch the trailing TP zone so that exactly one RR
-                        # interval is affected. Scaling all zones would bleed into
-                        # both the preceding and following RR intervals.
-                        if segment_ix == segments_count - 1:
+                    if physio_zones is None:
+                        # Default: only trailing TP in 6-zone mode so exactly one RR
+                        # interval is affected; all zones in legacy 5-zone mode.
+                        if segments_count == 6:
+                            if segment_ix == segments_count - 1:
+                                rhythm_v *= physio_art.rr_scale
+                        else:
                             rhythm_v *= physio_art.rr_scale
-                    else:
+                    elif segment_ix in physio_zones:
                         rhythm_v *= physio_art.rr_scale
 
                 artifact_data = artifacts_idx.get(segment_ix)
@@ -518,26 +538,40 @@ class Simulation:
                 ZONE_NOISE_FACTORS = [0.6, 0.1, 1.0, 0.05, 0.6, 0.6]  # P, PQ, QRS, ST, T, TP
                 zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < len(ZONE_NOISE_FACTORS) else 1.0
 
-                # Shape artifact: boost noise scale for this cycle
+                # Shape artifact: boost noise scale for this zone/cycle
                 effective_variance_scale = variance_scale
                 if physio_art and physio_art.artifact_type == 'shape':
-                    effective_variance_scale *= physio_art.noise_scale
+                    if physio_zones is None or segment_ix in physio_zones:
+                        effective_variance_scale *= physio_art.noise_scale
 
                 n = len(mean_data)
+                is_shape_zone = (physio_art and physio_art.artifact_type == 'shape'
+                                 and (physio_zones is None or segment_ix in physio_zones))
                 if n < 20:
                     ecg_signal = mean_data
                 else:
-                    std = effective_variance_scale * zone_factor * np.sqrt(np.abs(variance_data))
-                    noise = np.random.normal(0, std)
-                    wl = min(max(7, (n // 2) | 1), 101)
+                    if is_shape_zone:
+                        # Base noise on signal RMS so distortion is always visible
+                        # regardless of how small the prototype's per-cycle variance was.
+                        # Variance-based std can be near-zero for clean prototypes, making
+                        # even a high noise_scale invisible.
+                        signal_rms = max(float(np.sqrt(np.mean(np.array(mean_data, dtype=float) ** 2))), 1e-3)
+                        std = effective_variance_scale * zone_factor * signal_rms
+                        # Smaller window → preserves noise character rather than flattening it
+                        wl = min(max(7, (n // 4) | 1), 51)
+                    else:
+                        std = effective_variance_scale * zone_factor * np.sqrt(np.abs(variance_data))
+                        wl = min(max(7, (n // 2) | 1), 101)
                     if wl % 2 == 0:
                         wl -= 1
+                    noise = np.random.normal(0, std, n)
                     noise = savgol_filter(noise, window_length=wl, polyorder=2)
                     ecg_signal = mean_data + noise
 
-                # Amplitude artifact: scale the whole zone signal
+                # Amplitude artifact: scale this zone's signal
                 if physio_art and physio_art.artifact_type == 'amplitude':
-                    ecg_signal = ecg_signal * physio_art.amplitude_scale
+                    if physio_zones is None or segment_ix in physio_zones:
+                        ecg_signal = ecg_signal * physio_art.amplitude_scale
 
                 if new_duration != len(ecg_signal):
                     x_old = np.linspace(0, 1, len(ecg_signal))

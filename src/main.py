@@ -1390,6 +1390,8 @@ def simulate_ecg_from_math_stats():
             pa.get('rr_scale'),
             pa.get('amplitude_scale'),
             pa.get('noise_scale'),
+            pa.get('target_zones'),
+            pa.get('random_zone_strategy'),
         ))
 
     sim = Simulation()
