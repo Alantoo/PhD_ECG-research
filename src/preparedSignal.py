@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class PreparedSignal:
-    def __init__(self, signal, sampling_rate, delineation_method='dwt', r_peak_method='xqrs'):
+    def __init__(self, signal, sampling_rate, delineation_method='dwt', r_peak_method='neurokit'):
         self.sampling_rate = sampling_rate
         self.signal = signal
         self.multiplier = 1
@@ -211,20 +211,24 @@ class PreparedSignal:
             kept, total, skipped_nan, skipped_too_short,
         )
 
-    def get_6zone_matrices(self):
+    def get_zone_matrices(self):
         """
-        Returns (matrices, rhythm_matrix) for 6 anatomical zones, aligned beat-by-beat.
+        Returns (matrices, rhythm_matrix) for 6 anatomical zones in chronological order.
 
         Zone indices:
-            0 — TP baseline (T_off[i-1] → P_on[i])
-            1 — P-wave      (P_on        → P_off)
-            2 — PQ segment  (P_off       → Q)
-            3 — QRS complex (Q           → S)
-            4 — ST segment  (S           → T_on)
-            5 — T-wave      (T_on        → T_off)
+            0 — P-wave      (P_on        → P_off)
+            1 — PQ segment  (P_off       → Q)
+            2 — QRS complex (Q           → S)
+            3 — ST segment  (S           → T_on)
+            4 — T-wave      (T_on        → T_off)
+            5 — TP baseline (T_off[i]    → P_on[i+1])  ← trailing, from real signal data
 
         Each matrices[z] is a list of numpy arrays (one per valid cycle).
         rhythm_matrix[z] is a list of ints (duration in samples per cycle).
+
+        Beats at the boundary (last beat has no following P_on) get their TP zone
+        padded with the mean TP waveform and mean TP duration computed from all
+        valid cycles.
         """
         sig_arr = np.array(self.signal)
         sig_len = len(sig_arr)
@@ -246,10 +250,11 @@ class PreparedSignal:
 
         matrices      = [[] for _ in range(6)]
         rhythm_matrix = [[] for _ in range(6)]
+        # Track which beats have a valid trailing TP so we can pad the rest.
+        has_tp = []
         skipped = 0
 
-        for i in range(1, n):
-            t_off_prev = t_off_arr[i - 1]
+        for i in range(n):
             p_on  = p_on_arr[i]
             p_off = p_off_arr[i]
             q     = q_arr[i]
@@ -257,56 +262,98 @@ class PreparedSignal:
             t_on  = t_on_arr[i]
             t_off = t_off_arr[i]
 
-            fiducials = [t_off_prev, p_on, p_off, q, s, t_on, t_off]
+            # Trailing TP: needs the next beat's P_onset.
+            next_p_on = p_on_arr[i + 1] if i + 1 < n else float('nan')
+
+            fiducials = [p_on, p_off, q, s, t_on, t_off]
             if any(np.isnan(float(v)) for v in fiducials):
                 skipped += 1
+                has_tp.append(False)
                 continue
 
-            if not (t_off_prev < p_on < p_off < q < s < t_on < t_off):
+            if not (p_on < p_off < q < s < t_on < t_off):
                 skipped += 1
+                has_tp.append(False)
                 continue
 
-            segs = [
-                extract(t_off_prev, p_on),  # 0 TP baseline
-                extract(p_on,  p_off),       # 1 P-wave
-                extract(p_off, q),           # 2 PQ segment
-                extract(q,     s),           # 3 QRS complex
-                extract(s,     t_on),        # 4 ST segment
-                extract(t_on,  t_off),       # 5 T-wave
+            segs_no_tp = [
+                extract(p_on,  p_off),  # 0 P-wave
+                extract(p_off, q),      # 1 PQ segment
+                extract(q,     s),      # 2 QRS complex
+                extract(s,     t_on),   # 3 ST segment
+                extract(t_on,  t_off),  # 4 T-wave
             ]
 
-            if any(x is None or len(x) < 2 for x in segs):
+            if any(x is None or len(x) < 2 for x in segs_no_tp):
                 skipped += 1
+                has_tp.append(False)
                 continue
 
-            for z, seg in enumerate(segs):
+            # Check if trailing TP is measurable for this beat.
+            tp_valid = (
+                not np.isnan(next_p_on)
+                and t_off < next_p_on
+            )
+            tp_seg = extract(t_off, next_p_on) if tp_valid else None
+            if tp_seg is not None and len(tp_seg) < 2:
+                tp_seg = None
+
+            for z, seg in enumerate(segs_no_tp):
                 matrices[z].append(seg)
                 rhythm_matrix[z].append(len(seg))
 
+            if tp_seg is not None:
+                matrices[5].append(tp_seg)
+                rhythm_matrix[5].append(len(tp_seg))
+                has_tp.append(True)
+            else:
+                has_tp.append(False)
+
+        # Pad beats that are missing TP with the mean TP waveform.
+        n_valid_cycles = len(matrices[0])
+        n_with_tp      = len(matrices[5])
+
+        if n_with_tp > 0 and n_with_tp < n_valid_cycles:
+            mean_tp_duration = int(round(np.mean([len(s) for s in matrices[5]])))
+            # Compute mean TP waveform: interpolate all valid TP arrays to mean_tp_duration.
+            normalized_tps = []
+            for arr in matrices[5]:
+                arr = np.array(arr, dtype=float)
+                if len(arr) == mean_tp_duration:
+                    normalized_tps.append(arr)
+                else:
+                    f = interp.interp1d(np.arange(len(arr)), arr)
+                    normalized_tps.append(f(np.linspace(0, len(arr) - 1, mean_tp_duration)))
+            mean_tp_waveform = np.mean(np.array(normalized_tps), axis=0)
+
+            missing = n_valid_cycles - n_with_tp
+            for _ in range(missing):
+                matrices[5].append(mean_tp_waveform)
+                rhythm_matrix[5].append(mean_tp_duration)
+
         logger.info(
-            "get_6zone_matrices: %d valid cycles, %d skipped",
-            len(matrices[0]), skipped,
+            "get_zone_matrices: %d valid cycles (%d with real TP, %d padded), %d skipped",
+            n_valid_cycles, n_with_tp, n_valid_cycles - n_with_tp, skipped,
         )
         return matrices, rhythm_matrix
 
-    def get_6zone_stats(self):
-        """Per-zone mean and variance for 6-zone modelling.
+    def get_zone_stats(self):
+        """Per-zone mean and variance for zone-based modelling.
 
         Returns (mean_points, variance_points) where each is a list of [index, value]
         pairs with zones 0-5 concatenated in order.  The split boundaries are
-        recoverable from rhythm_6zones mean durations (same ordering as get_6zone_matrices).
+        recoverable from rhythm_7zones mean durations (same ordering as get_zone_matrices).
 
-        Returns (None, None) if the signal has no valid 6-zone cycles.
+        Returns (None, None) if the signal has no valid cycles.
         """
-        matrices, _ = self.get_6zone_matrices()
+        matrices, _ = self.get_zone_matrices()
         if not matrices[0]:
             return None, None
 
         mean_concat = []
         var_concat  = []
 
-        for z in range(6):
-            zone_arrays = matrices[z]
+        for zone_arrays in matrices:
             if not zone_arrays:
                 continue
             target_size = len(zone_arrays[0])
@@ -321,7 +368,7 @@ class PreparedSignal:
                 else:
                     normalized.append(np.full(target_size, arr[0] if len(arr) else 0.0))
 
-            mat       = np.array(normalized)          # (n_cycles, target_size)
+            mat = np.array(normalized)          # (n_cycles, target_size)
             mean_concat.extend(np.mean(mat, axis=0).tolist())
             var_concat.extend( np.var( mat, axis=0).tolist())
 
@@ -331,22 +378,24 @@ class PreparedSignal:
             [[i, var_concat[i]]  for i in range(n)],
         )
 
-    def get_6zone_rhythm_points(self):
+    def get_zone_rhythm_points(self):
         """
-        Returns rhythm as interleaved 6-zone durations (samples) for use with
-        /v2/modelling/math_stats (segments_count=6).
+        Returns rhythm as interleaved per-zone durations (samples) for use with
+        /v2/modelling/math_stats.
 
-        Decoded by: rhythm_values[z::6] gives durations for zone z across all cycles.
+        Decoded by: rhythm_values[z::N] gives durations for zone z across all cycles,
+        where N is the number of zones.
         """
-        _, rhythm_matrix = self.get_6zone_matrices()
+        _, rhythm_matrix = self.get_zone_matrices()
         if not rhythm_matrix[0]:
             return []
+        n_zones  = len(rhythm_matrix)
         n_cycles = min(len(rm) for rm in rhythm_matrix)
         points   = []
         beat_idx = 1
         for i in range(n_cycles):
             for rm in rhythm_matrix:
-                points.append([round(beat_idx / 7, 6), rm[i]])
+                points.append([round(beat_idx / (n_zones + 1), 6), rm[i]])
                 beat_idx += 1
         return points
 
@@ -360,20 +409,18 @@ class PreparedSignal:
         return interp_matrix, mod_sampling_rate
 
     def get_stats(self):
-        # Build full-cycle beats as P → PQ → QRS → ST → T → TP so that the
-        # mean waveform includes the trailing TP baseline.
-        # Zone 0 of beat i is T_off[i-1]→P_on[i], so the TP that follows beat
-        # i is zone 0 of beat i+1 — hence we pair zones 1-5 of beat i with
-        # zone 0 of beat i+1, yielding n_cycles-1 complete cycles.
-        # Fall back to the old matrix_beat path if 6-zone extraction fails.
-        matrices, _ = self.get_6zone_matrices()
+        # Build full-cycle beats as P → PQ → QRS → ST → T → TP.
+        # Zones 0-4 come from beat i; zone 5 (trailing TP) also comes from beat i
+        # because it is now stored as the trailing segment of that same beat.
+        # Fall back to the old matrix_beat path if zone extraction fails.
+        matrices, _ = self.get_zone_matrices()
         mod_sampling_rate = int(self.sampling_rate * self.multiplier)
         if matrices[0]:
-            n_cycles = min(len(m) for m in matrices) - 1  # need next beat's zone 0
+            n_cycles = min(len(m) for m in matrices)
             interp_matrix_all = []
             for i in range(n_cycles):
                 beat = np.concatenate(
-                    [matrices[z][i] for z in range(1, 6)] + [matrices[0][i + 1]]
+                    [matrices[z][i] for z in range(len(matrices))]
                 )
                 f = interp.interp1d(np.arange(beat.size), beat)
                 interp_matrix_all.append(
@@ -440,5 +487,5 @@ class PreparedSignal:
             "central_moment_functions_fourth_order": to_data_points(centralMomentFunctionsFourthOrder),
             "variance": to_data_points(variance),
             "rhythm": self.rhythm_points,
-            "rhythm_6zones": self.get_6zone_rhythm_points(),
+            "rhythm_7zones": self.get_zone_rhythm_points(),
         }

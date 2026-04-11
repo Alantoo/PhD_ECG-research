@@ -150,18 +150,18 @@ class Simulation:
     def gen_ecg_from_prepared(self, prepared, cfg: ArtifactsConfig):
         """Generate ECG from a PreparedSignal using 6 anatomical zones.
 
-        Zone indices match PreparedSignal.get_6zone_matrices():
-            0 — TP baseline   (T_off → P_on)
-            1 — P-wave        (P_on  → P_off)
-            2 — PQ segment    (P_off → Q)
-            3 — QRS complex   (Q     → S)
-            4 — ST segment    (S     → T_on)
-            5 — T-wave        (T_on  → T_off)
+        Zone indices match PreparedSignal.get_zone_matrices():
+            0 — P-wave        (P_on  → P_off)
+            1 — PQ segment    (P_off → Q)
+            2 — QRS complex   (Q     → S)
+            3 — ST segment    (S     → T_on)
+            4 — T-wave        (T_on  → T_off)
+            5 — TP baseline   (T_off → P_on of next beat)  ← trailing
         """
-        matrices, rhythm_matrix = prepared.get_6zone_matrices()
+        matrices, rhythm_matrix = prepared.get_zone_matrices()
         if not matrices[0]:
             raise ValueError(
-                "PreparedSignal has no valid 6-zone cycles — check delineation quality"
+                "PreparedSignal has no valid zone cycles — check delineation quality"
             )
         return self.gen_ecg_from_matrix(matrices, rhythm_matrix, cfg, prepared.sampling_rate)
 
@@ -334,7 +334,7 @@ class Simulation:
         return final_seq['points'], meta
 
     def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig, sampling_rate: int = 500,
-                                mean_6zones=None, var_6zones=None, variance_scale: float = 0.3,
+                                mean_7zones=None, var_7zones=None, variance_scale: float = 0.3,
                                 physio_artifacts: list[PhysioArtifactConfig] | None = None):
         def to_matrix(time_series):
             values = time_series[1]
@@ -351,33 +351,25 @@ class Simulation:
             values = time_series[1]
             return [list(values[ix::segments_count]) for ix in range(segments_count)]
 
-        def to_matrix_6zone(time_series, mean_durations):
-            """Split mean/variance for the 6-zone anatomical model.
+        def to_matrix_zone(time_series, mean_durations):
+            """Fallback: split flat mean beat into per-zone arrays proportionally.
 
-            Zone 0 (TP) is a flat diastolic baseline — it is NOT captured in the
-            mean beat (which starts at P_on).  Zones 1-5 (P, PQ, QRS, ST, T) are
-            proportional slices of the 500-sample normalised beat, sized according
+            Used when mean_7zones is not supplied. All zones including trailing TP
+            are proportional slices of the full mean beat waveform, sized according
             to each zone's mean duration.
             """
             values = time_series[1]
             n = len(values)
+            total = sum(mean_durations)
 
-            non_tp_durs = mean_durations[1:]          # zones 1-5
-            total_non_tp = sum(non_tp_durs)
+            if total <= 0:
+                return to_matrix(time_series)
 
-            if total_non_tp <= 0:
-                return to_matrix(time_series)         # fallback to equal split
-
-            # Zone 0: flat TP baseline at the mean level of the beat start
-            tp_size = max(4, int(round(mean_durations[0])))
-            baseline = float(np.mean(values[:max(1, n // 10)]))
-            matrix = [np.full(tp_size, baseline)]
-
-            # Zones 1-5: proportional slices of the normalised mean beat
+            matrix = []
             offset = 0
-            for z, dur in enumerate(non_tp_durs):
-                if z < len(non_tp_durs) - 1:
-                    size = max(4, int(round(dur / total_non_tp * n)))
+            for z, dur in enumerate(mean_durations):
+                if z < len(mean_durations) - 1:
+                    size = max(4, int(round(dur / total * n)))
                     matrix.append(np.array(values[offset:offset + size]))
                     offset += size
                 else:
@@ -385,38 +377,20 @@ class Simulation:
 
             return matrix
 
-        def to_variance_6zone(time_series, mean_durations):
-            """Same proportional split as to_matrix_6zone, but zone 0 (TP) gets
-            near-zero variance — TP is a flat diastolic segment."""
-            values = time_series[1]
-            n = len(values)
+        def to_variance_zone(time_series, mean_durations):
+            """Fallback: same proportional split as to_matrix_zone for variance.
 
-            non_tp_durs = mean_durations[1:]
-            total_non_tp = sum(non_tp_durs)
+            All zones including trailing TP get real variance from the flat variance
+            array — no fabricated near-zero values.
+            """
+            return to_matrix_zone(time_series, mean_durations)
 
-            if total_non_tp <= 0:
-                return to_matrix(time_series)
-
-            tp_size = max(4, int(round(mean_durations[0])))
-            matrix = [np.full(tp_size, 1e-6)]          # near-flat variance for TP
-
-            offset = 0
-            for z, dur in enumerate(non_tp_durs):
-                if z < len(non_tp_durs) - 1:
-                    size = max(4, int(round(dur / total_non_tp * n)))
-                    matrix.append(np.array(values[offset:offset + size]))
-                    offset += size
-                else:
-                    matrix.append(np.array(values[offset:]))
-
-            return matrix
-
-        def to_split_from_6zone(time_series, mean_durations):
+        def to_split_from_7zone(time_series, mean_durations):
             """Split pre-computed per-zone concatenated data into a zone matrix.
 
-            The concatenated array was produced by get_6zone_stats(), which writes
+            The concatenated array was produced by get_zone_stats(), which writes
             zones 0-5 sequentially, each sized according to the actual zone arrays.
-            We recover the sizes from mean_durations (same ordering as rhythm_6zones).
+            We recover the sizes from mean_durations (same ordering as rhythm_7zones).
             """
             values = time_series[1]
             matrix = []
@@ -433,12 +407,12 @@ class Simulation:
         rhythm_matrix = to_rhythm_matrix(rhythm)
         mean_time_rhythm = [np.mean(i) for i in rhythm_matrix]
 
-        if segments_count == 6 and mean_6zones is not None and var_6zones is not None:
-            mean_matrix     = to_split_from_6zone(mean_6zones,   mean_time_rhythm)
-            variance_matrix = to_split_from_6zone(var_6zones,    mean_time_rhythm)
+        if segments_count == 6 and mean_7zones is not None and var_7zones is not None:
+            mean_matrix     = to_split_from_7zone(mean_7zones,   mean_time_rhythm)
+            variance_matrix = to_split_from_7zone(var_7zones,    mean_time_rhythm)
         elif segments_count == 6:
-            mean_matrix     = to_matrix_6zone(mean,     mean_time_rhythm)
-            variance_matrix = to_variance_6zone(variance, mean_time_rhythm)
+            mean_matrix     = to_matrix_zone(mean,     mean_time_rhythm)
+            variance_matrix = to_variance_zone(variance, mean_time_rhythm)
         else:
             mean_matrix     = to_matrix(mean)
             variance_matrix = to_matrix(variance)
@@ -486,10 +460,10 @@ class Simulation:
 
                 if physio_art and physio_art.artifact_type == 'rhythm':
                     if segments_count == 6:
-                        # Only stretch the TP zone (diastole before the beat) so that
-                        # exactly one RR interval is affected. Scaling all zones would
-                        # bleed into both the preceding and following RR intervals.
-                        if segment_ix == 0:
+                        # Only stretch the trailing TP zone so that exactly one RR
+                        # interval is affected. Scaling all zones would bleed into
+                        # both the preceding and following RR intervals.
+                        if segment_ix == segments_count - 1:
                             rhythm_v *= physio_art.rr_scale
                     else:
                         rhythm_v *= physio_art.rr_scale
@@ -541,8 +515,8 @@ class Simulation:
                 new_duration = max(1, int(segment_duration * rhythm_ratio))
                 t = np.arange(new_duration, dtype=float) / sampling_rate
 
-                ZONE_NOISE_FACTORS = [0.05, 0.6, 0.1, 1.0, 0.05, 0.6]
-                zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < 6 else 1.0
+                ZONE_NOISE_FACTORS = [0.6, 0.1, 1.0, 0.05, 0.6, 0.6]  # P, PQ, QRS, ST, T, TP
+                zone_factor = ZONE_NOISE_FACTORS[segment_ix] if segments_count == 6 and segment_ix < len(ZONE_NOISE_FACTORS) else 1.0
 
                 # Shape artifact: boost noise scale for this cycle
                 effective_variance_scale = variance_scale

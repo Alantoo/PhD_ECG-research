@@ -318,7 +318,7 @@ def get_signal_modelled(database, datafile, signal):
 
     artifacts_cfg = ArtifactsConfig(count, segments)
 
-    prepared  = PreparedSignal(data, 500, delineation_method='dwt', r_peak_method='neurokit')
+    prepared  = PreparedSignal(data, 500, delineation_method='dwt')
     s         = Simulation()
     generated, meta = s.gen_ecg_from_prepared(prepared, artifacts_cfg)
 
@@ -362,12 +362,12 @@ def generate_mat_stats():
     if len(rawSignal) > 2 and len(rawSignal[0]) == 2:
         input = np.transpose(rawSignal).tolist()[1]
 
-    prepared  = PreparedSignal(input, 500, delineation_method='dwt', r_peak_method='neurokit')
+    prepared  = PreparedSignal(input, 500, delineation_method='dwt')
     stats     = prepared.get_stats()
-    mean_6z, var_6z = prepared.get_6zone_stats()
-    if mean_6z is not None:
-        stats['mean_6zones']     = mean_6z
-        stats['variance_6zones'] = var_6z
+    mean_7z, var_7z = prepared.get_zone_stats()
+    if mean_7z is not None:
+        stats['mean_7zones']     = mean_7z
+        stats['variance_7zones'] = var_7z
     json_data = json.dumps(stats, ignore_nan=True)
     return Response(json_data, mimetype='application/json')
 
@@ -498,7 +498,7 @@ def detect_segments_endpoint():
 
     sampling_rate = 500
     method = request.args.get('method', 'dwt')
-    r_peak_method = request.args.get('r_peak_method', 'xqrs')
+    r_peak_method = request.args.get('r_peak_method', 'neurokit')
     y_values, base_time = _extract_signal_with_time(raw_signal)
     prepared = PreparedSignal(y_values, sampling_rate, delineation_method=method, r_peak_method=r_peak_method)
     time_offset = base_time
@@ -628,7 +628,8 @@ def get_signal_segments(database, datafile, signal):
     raw = np.array(df.signals[signal])
     import neurokit2 as nk
     cleaned = nk.ecg_clean(raw, sampling_rate=sampling_rate)
-    r_indices = wfdb.processing.xqrs_detect(cleaned, fs=sampling_rate, verbose=False)
+    _, info = nk.ecg_peaks(cleaned, sampling_rate=sampling_rate, method='neurokit')
+    r_indices = info['ECG_R_Peaks']
     _, waves = nk.ecg_delineate(cleaned, {"ECG_R_Peaks": r_indices}, sampling_rate=sampling_rate)
 
     def wave_to_list(key):
@@ -641,7 +642,7 @@ def get_signal_segments(database, datafile, signal):
         "t_peaks": wave_to_list("ECG_T_Peaks"),
         "q_peaks": wave_to_list("ECG_Q_Peaks"),
         "s_peaks": wave_to_list("ECG_S_Peaks"),
-        "source": "xqrs",
+        "source": "neurokit",
     }
     return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
 
@@ -1367,17 +1368,17 @@ def simulate_ecg_from_math_stats():
     variance_data = to_np_array_on_demand(body['variance'])
     mean_data     = to_np_array_on_demand(body['mean'])
 
-    # Prefer 6-zone rhythm (anatomical zones from DWT+Neurokit); fall back to
+    # Prefer 7-zone rhythm (anatomical zones from DWT+Neurokit); fall back to
     # legacy 5-peak-type format for backward compatibility.
-    if body.get('rhythm_6zones'):
+    if body.get('rhythm_7zones'):
         segments_count = 6
-        rhythm_data    = to_np_array_on_demand(body['rhythm_6zones'])
+        rhythm_data    = to_np_array_on_demand(body['rhythm_7zones'])
     else:
         segments_count = 5
         rhythm_data    = to_np_array_on_demand(body['rhythm'])
 
-    mean_6zones    = to_np_array_on_demand(body['mean_6zones'])     if body.get('mean_6zones')     else None
-    var_6zones     = to_np_array_on_demand(body['variance_6zones']) if body.get('variance_6zones') else None
+    mean_7zones    = to_np_array_on_demand(body['mean_7zones'])     if body.get('mean_7zones')     else None
+    var_7zones     = to_np_array_on_demand(body['variance_7zones']) if body.get('variance_7zones') else None
     variance_scale = float(body['variance_scale']) if body.get('variance_scale') is not None else 0.3
 
     physio_artifacts = []
@@ -1394,7 +1395,7 @@ def simulate_ecg_from_math_stats():
     sim = Simulation()
     generated, meta = sim.gen_ecg_from_math_stats(
         segments_count, mean_data, variance_data, rhythm_data, cfg,
-        mean_6zones=mean_6zones, var_6zones=var_6zones, variance_scale=variance_scale,
+        mean_7zones=mean_7zones, var_7zones=var_7zones, variance_scale=variance_scale,
         physio_artifacts=physio_artifacts or None,
     )
 
