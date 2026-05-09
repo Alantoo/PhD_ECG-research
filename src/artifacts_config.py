@@ -6,9 +6,10 @@ class ArtifactsConfig:
         self.cycles_count = int(cycles_count)
         self.segment_cfg: list[SegmentArtifactsConfig] = []
         for s in segment_cfg:
+            zones = s.get('zones') or [s['index']]
             self.segment_cfg.append(SegmentArtifactsConfig(
                 s['points'],
-                s['index'],
+                zones,
                 s['count_or_pos'],
                 s.get('exact_placement', False),
                 s.get('duration'),

@@ -54,6 +54,30 @@ def pick_random_unique_n(size: int, n: int):
     return seq_copy[:n]
 
 
+def _resample_artifact_to_uniform(
+    scaled_points: list[list[float]],
+    sampling_rate: int,
+) -> tuple[list[float], list[float]]:
+    """Resample artifact segment to uniform time grid at sampling_rate.
+
+    The saved fragment may have been captured from a signal with a different
+    (or non-uniform) sample density.  Inserting it as-is creates x-axis
+    irregularities in the output signal that confuse downstream processing
+    (e.g. segment detection, which assumes uniform spacing).
+
+    Returns (t, v) ready to pass to append_seg_point.
+    """
+    t_src = np.array([p[0] for p in scaled_points])
+    v_src = np.array([p[1] for p in scaled_points])
+    duration = float(t_src[-1])
+    n_samples = max(2, round(duration * sampling_rate) + 1)
+    t_uniform = np.arange(n_samples) / sampling_rate
+    # Clamp to source range to avoid extrapolation artefacts at the boundary
+    t_uniform = np.clip(t_uniform, t_src[0], t_src[-1])
+    v_uniform = np.interp(t_uniform, t_src, v_src)
+    return t_uniform.tolist(), v_uniform.tolist()
+
+
 class Simulation:
     def __init__(self):
         pass
@@ -213,9 +237,10 @@ class Simulation:
         for c in cfg.segment_cfg:
             insert_places = pick_random_unique_n(cycles_count, c.count_or_pos) if not c.exact_placement else [
                 c.count_or_pos - 1]
-            artifacts_idx[c.index] = {
+            artifacts_idx[c.zones[0]] = {
                 "places": insert_places,
                 "cfg": c,
+                "span": c.zones,
             }
 
         # points = list()
@@ -233,14 +258,26 @@ class Simulation:
             final_seq['last_time'] += len(v) / sampling_rate
 
         for cycle_ix in range(cycles_count):
+            zones_to_skip: set[int] = set()
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
                 rhythm_v = float(raw_rhythm[cycle_ix % available_rhythm])
 
+                if segment_ix in zones_to_skip:
+                    continue
+
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
+                    span: list[int] = artifact_data['span']
+
+                    # Sum natural rhythm duration across all zones in the span
+                    total_rhythm_v = sum(
+                        float(rhythm_matrix[z][cycle_ix % available_rhythm])
+                        for z in span
+                    )
+
                     # Normalize X to start from 0: points may come from a project signal
                     # with absolute timestamps (e.g. [2.5, 2.502, ...]) rather than relative
                     # ones. Without normalization the first ~N ms of the zone is a straight-line
@@ -249,14 +286,14 @@ class Simulation:
                     rel_points = [[p[0] - first_x, p[1]] for p in segment_cfg.points]
                     max_ts = rel_points[-1][0] if rel_points else 0
 
-                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v.
-                    # rhythm_v is in samples; artifact points X-axis is in seconds — convert.
-                    rhythm_duration_sec = rhythm_v / sampling_rate
+                    # X-axis: explicit duration overrides rhythm; otherwise fill the combined span.
+                    # total_rhythm_v is in samples; artifact points X-axis is in seconds — convert.
+                    total_rhythm_duration_sec = total_rhythm_v / sampling_rate
                     if segment_cfg.duration is not None and segment_cfg.duration > 0:
                         target_duration_sec = segment_cfg.duration
                         rhythm_ratio = target_duration_sec / max_ts if max_ts > 0 else 1.0
                     else:
-                        rhythm_ratio = rhythm_duration_sec / max_ts if max_ts > 0 else 1.0
+                        rhythm_ratio = total_rhythm_duration_sec / max_ts if max_ts > 0 else 1.0
 
                     scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in rel_points]
 
@@ -275,7 +312,7 @@ class Simulation:
                             mid = (segment_cfg.min_height + segment_cfg.max_height) / 2
                             scaled_points = [[p[0], mid] for p in scaled_points]
 
-                    t, v = zip(*scaled_points)
+                    t, v = _resample_artifact_to_uniform(scaled_points, sampling_rate)
                     prev_last_time = final_seq['last_time']
                     append_seg_point(t, v)
                     # Override: advance last_time by actual scaled duration (t[-1] + one sample),
@@ -283,6 +320,8 @@ class Simulation:
                     # when rhythm_ratio ≠ 1 the next zone starts at the wrong time, making
                     # the time axis non-monotonic and creating overlapping or gapped zones.
                     final_seq['last_time'] = prev_last_time + t[-1] + 1.0 / sampling_rate
+
+                    zones_to_skip.update(span[1:])
                     continue
 
                 raw_data = interpolated_matrix[segment_ix][cycle_ix]
@@ -424,9 +463,10 @@ class Simulation:
         for c in cfg.segment_cfg:
             insert_places = pick_random_unique_n(cycles_count, c.count_or_pos) if not c.exact_placement else [
                 c.count_or_pos - 1]
-            artifacts_idx[c.index] = {
+            artifacts_idx[c.zones[0]] = {
                 "places": insert_places,
                 "cfg": c,
+                "span": c.zones,
             }
 
         # Physio artifact index: cycle_ix → (config, effective_zones)
@@ -471,10 +511,14 @@ class Simulation:
             physio_art   = physio_entry[0] if physio_entry else None
             physio_zones = physio_entry[1] if physio_entry else None  # None = all zones
 
+            zones_to_skip: set[int] = set()
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
                 mean_rhythm = float(mean_time_rhythm[segment_ix])
                 rhythm_v = float(raw_rhythm[cycle_ix % available_rhythm])
+
+                if segment_ix in zones_to_skip:
+                    continue
 
                 if physio_art and physio_art.artifact_type == 'rhythm':
                     if physio_zones is None:
@@ -491,19 +535,29 @@ class Simulation:
                 artifact_data = artifacts_idx.get(segment_ix)
                 if artifact_data is not None and cycle_ix in artifact_data['places']:
                     segment_cfg: SegmentArtifactsConfig = artifact_data['cfg']
+                    span: list[int] = artifact_data['span']
+
+                    # Sum natural rhythm duration across all zones in the span.
+                    # rhythm physio artifact scaling on the trigger zone is already
+                    # applied above; remaining span zones use their raw rhythm_v.
+                    total_rhythm_v = rhythm_v + sum(
+                        float(rhythm_matrix[z][cycle_ix % available_rhythm])
+                        for z in span[1:]
+                    )
+
                     # Normalize X to start from 0 (same reason as gen_ecg_from_matrix).
                     first_x = segment_cfg.points[0][0] if segment_cfg.points else 0
                     rel_points = [[p[0] - first_x, p[1]] for p in segment_cfg.points]
                     max_ts = rel_points[-1][0] if rel_points else 0
 
-                    # X-axis: explicit duration overrides rhythm; otherwise follow per-cycle rhythm_v.
-                    # rhythm_v is in samples; artifact points X-axis is in seconds — convert.
-                    rhythm_duration_sec = rhythm_v / sampling_rate
+                    # X-axis: explicit duration overrides rhythm; otherwise fill the combined span.
+                    # total_rhythm_v is in samples; artifact points X-axis is in seconds — convert.
+                    total_rhythm_duration_sec = total_rhythm_v / sampling_rate
                     if segment_cfg.duration is not None and segment_cfg.duration > 0:
                         target_duration_sec = segment_cfg.duration
                         rhythm_ratio = target_duration_sec / max_ts if max_ts > 0 else 1.0
                     else:
-                        rhythm_ratio = rhythm_duration_sec / max_ts if max_ts > 0 else 1.0
+                        rhythm_ratio = total_rhythm_duration_sec / max_ts if max_ts > 0 else 1.0
 
                     scaled_points = [[p[0] * rhythm_ratio, p[1]] for p in rel_points]
 
@@ -521,10 +575,12 @@ class Simulation:
                             mid = (segment_cfg.min_height + segment_cfg.max_height) / 2
                             scaled_points = [[p[0], mid] for p in scaled_points]
 
-                    t, v = zip(*scaled_points)
+                    t, v = _resample_artifact_to_uniform(scaled_points, sampling_rate)
                     prev_last_time = final_seq['last_time']
                     append_seg_point(t, v)
                     final_seq['last_time'] = prev_last_time + t[-1] + 1.0 / sampling_rate
+
+                    zones_to_skip.update(span[1:])
                     continue
 
                 mean_data = mean_matrix[segment_ix]

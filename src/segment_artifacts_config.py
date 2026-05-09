@@ -1,8 +1,8 @@
 class SegmentArtifactsConfig:
-    def __init__(self, points, index, count_or_pos, exact_placement,
+    def __init__(self, points, zones, count_or_pos, exact_placement,
                  duration=None, min_height=None, max_height=None):
         self.points: list[list[int]] = points
-        self.index = int(index)
+        self.zones: list[int] = sorted(int(z) for z in zones)
         self.count_or_pos = int(count_or_pos)
         self.exact_placement = exact_placement is True
         # Optional render-time overrides
