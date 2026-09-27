@@ -12,6 +12,7 @@ from scipy.signal import resample
 from artifacts_config import ArtifactsConfig
 from segment_artifacts_config import SegmentArtifactsConfig
 from physio_artifact_config import PhysioArtifactConfig
+from rhythm_artifact_config import RhythmArtifactConfig
 
 
 def show_plot(title, t_data, sig_data):
@@ -374,7 +375,8 @@ class Simulation:
 
     def gen_ecg_from_math_stats(self, segments_count, mean, variance, rhythm, cfg: ArtifactsConfig, sampling_rate: int = 500,
                                 mean_7zones=None, var_7zones=None, variance_scale: float = 0.3,
-                                physio_artifacts: list[PhysioArtifactConfig] | None = None):
+                                physio_artifacts: list[PhysioArtifactConfig] | None = None,
+                                rhythm_artifacts: list[RhythmArtifactConfig] | None = None):
         def to_matrix(time_series):
             values = time_series[1]
             matrix = list()
@@ -492,6 +494,37 @@ class Simulation:
                     effective_zones = [int(z) for z in pa.target_zones]
                 physio_idx[place] = (pa, effective_zones)
 
+        # Rhythm artifact plan: cycle_ix → {class, rr_ratio, dropped, tp_scale}.
+        # Later entries win on collision; kept separate from physio_idx so a rhythm
+        # artifact can stack with an amplitude / shape artifact on the same cycle.
+        rhythm_plan: dict[int, dict] = {}
+        for ra in (rhythm_artifacts or []):
+            for entry in ra.expand(cycles_count, pick_random_unique_n):
+                rhythm_plan[entry['cycle']] = entry
+
+        tp_zone_ix = segments_count - 1
+        min_tp_samples = 4
+        rhythm_truth: list[dict] = []
+        cycle_windows: list[list[float]] = []
+
+        def cycle_rhythm_values(cycle_ix):
+            return [float(rhythm_matrix[z][cycle_ix % available_rhythm]) for z in range(segments_count)]
+
+        def resolve_tp_target(cycle_ix, entry):
+            """Return (tp_samples, achieved_ratio, clamped) for a ratio-based rhythm artifact."""
+            values = cycle_rhythm_values(cycle_ix)
+            cycle_samples = sum(values)
+            tp_natural = values[tp_zone_ix]
+            beat_samples = cycle_samples - tp_natural
+            target_cycle = cycle_samples * entry['rr_ratio']
+            tp_target = target_cycle - beat_samples
+            clamped = False
+            if tp_target < min_tp_samples:
+                tp_target = float(min_tp_samples)
+                clamped = True
+            achieved = (beat_samples + tp_target) / cycle_samples if cycle_samples > 0 else entry['rr_ratio']
+            return tp_target, achieved, clamped
+
         # points = list()
         # last_time = 0
         final_seq = {
@@ -506,11 +539,60 @@ class Simulation:
 
             final_seq['last_time'] += len(v) / sampling_rate
 
+        def append_dropped_cycle(cycle_ix):
+            """Replace the whole cycle with diastolic baseline so the QRS is truly absent."""
+            duration = max(1, int(round(sum(cycle_rhythm_values(cycle_ix)))))
+            baseline_mean = mean_matrix[tp_zone_ix] if segments_count == 6 else np.concatenate(mean_matrix)
+            baseline_var  = variance_matrix[tp_zone_ix] if segments_count == 6 else np.concatenate(variance_matrix)
+            level = float(np.mean(baseline_mean))
+            std = variance_scale * 0.6 * float(np.sqrt(np.abs(np.mean(baseline_var))))
+            noise = np.random.normal(0, std, duration)
+            if duration >= 7:
+                wl = min(max(7, (duration // 2) | 1), 101)
+                noise = savgol_filter(noise, window_length=wl, polyorder=2)
+            t = np.arange(duration, dtype=float) / sampling_rate
+            append_seg_point(t, level + noise)
+
         for cycle_ix in range(cycles_count):
             physio_entry = physio_idx.get(cycle_ix)
             physio_art   = physio_entry[0] if physio_entry else None
             physio_zones = physio_entry[1] if physio_entry else None  # None = all zones
 
+            cycle_start_time = final_seq['last_time']
+            rhythm_entry = rhythm_plan.get(cycle_ix)
+            tp_override: float | None = None
+            cycle_ratio_all_zones: float | None = None
+            r_time: float | None = None
+
+            if rhythm_entry is not None:
+                truth = {
+                    'cycle':             cycle_ix,
+                    'class':             rhythm_entry['class'],
+                    'dropped':           rhythm_entry['dropped'],
+                    'rr_ratio_target':   rhythm_entry['rr_ratio'],
+                    'rr_ratio_achieved': None,
+                    'tp_scale':          rhythm_entry['tp_scale'],
+                    'clamped':           False,
+                }
+                if rhythm_entry['dropped']:
+                    append_dropped_cycle(cycle_ix)
+                    truth['start'] = round(cycle_start_time, 4)
+                    truth['end']   = round(final_seq['last_time'], 4)
+                    truth['r_time'] = None
+                    rhythm_truth.append(truth)
+                    cycle_windows.append([round(cycle_start_time, 4), round(final_seq['last_time'], 4)])
+                    continue
+                if rhythm_entry['rr_ratio'] is not None:
+                    if segments_count == 6:
+                        tp_override, achieved, clamped = resolve_tp_target(cycle_ix, rhythm_entry)
+                        truth['rr_ratio_achieved'] = round(achieved, 3)
+                        truth['clamped'] = clamped
+                    else:
+                        cycle_ratio_all_zones = rhythm_entry['rr_ratio']
+                        truth['rr_ratio_achieved'] = rhythm_entry['rr_ratio']
+                rhythm_truth.append(truth)
+
+            cycle_points_start = len(final_seq['points'])
             zones_to_skip: set[int] = set()
             for segment_ix in range(segments_count):
                 raw_rhythm = rhythm_matrix[segment_ix]
@@ -519,6 +601,18 @@ class Simulation:
 
                 if segment_ix in zones_to_skip:
                     continue
+
+                if rhythm_entry is not None:
+                    if tp_override is not None and segment_ix == tp_zone_ix:
+                        rhythm_v = tp_override
+                    elif cycle_ratio_all_zones is not None:
+                        rhythm_v *= cycle_ratio_all_zones
+                    elif rhythm_entry['tp_scale'] is not None:
+                        if segments_count == 6:
+                            if segment_ix == tp_zone_ix:
+                                rhythm_v *= rhythm_entry['tp_scale']
+                        else:
+                            rhythm_v *= rhythm_entry['tp_scale']
 
                 if physio_art and physio_art.artifact_type == 'rhythm':
                     if physio_zones is None:
@@ -637,6 +731,15 @@ class Simulation:
                     postprocessed = ecg_signal
                 append_seg_point(t, postprocessed)
 
+            cycle_points = final_seq['points'][cycle_points_start:]
+            if cycle_points:
+                r_time = max(cycle_points, key=lambda p: p[1])[0]
+            cycle_windows.append([round(cycle_start_time, 4), round(final_seq['last_time'], 4)])
+            if rhythm_entry is not None:
+                rhythm_truth[-1]['start']  = round(cycle_start_time, 4)
+                rhythm_truth[-1]['end']    = round(final_seq['last_time'], 4)
+                rhythm_truth[-1]['r_time'] = round(r_time, 4) if r_time is not None else None
+
         def stats_matrix_to_points(matrix):
             data = []
             for row in matrix:
@@ -652,7 +755,10 @@ class Simulation:
             "mean": stats_matrix_to_points(mean_matrix),
             "variance": stats_matrix_to_points(variance_matrix),
             "rhythm": stats_matrix_to_points(rhythm_matrix),
-            "mean_rhythm": mean_time_rhythm
+            "mean_rhythm": mean_time_rhythm,
+            "t0_seconds": round(float(sum(mean_time_rhythm)) / sampling_rate, 4),
+            "cycle_windows": cycle_windows,
+            "rhythm_artifacts": rhythm_truth,
         }
 
         return final_seq['points'], meta

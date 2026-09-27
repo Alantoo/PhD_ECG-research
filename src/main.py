@@ -16,6 +16,9 @@ from werkzeug.exceptions import NotFound
 
 from artifacts_config import ArtifactsConfig
 from physio_artifact_config import PhysioArtifactConfig
+from rhythm_artifact_config import RhythmArtifactConfig
+from my_helpers.rhythm_classifier import classify_rr_sequence, CLASS_NORMAL, CLASS_NAMES, \
+    DEFAULT_DELTA, DEFAULT_DROPPED_EPS, DEFAULT_WINDOW
 from classification_signal import EnsembleSignalClassifier
 from gen_sig import to_np_array
 from get_config.ecg_config import ECGConfig
@@ -1016,96 +1019,57 @@ def detect_artifacts_endpoint():
 
 @app.post('/detect-artifacts/rhythm')
 def detect_artifacts_rhythm():
-    body = request.get_json()
-    sigma = float(body.get('sigma', 3.0)) if isinstance(body, dict) else 3.0
+    body   = request.get_json()
+    params = body if isinstance(body, dict) else {}
+    delta       = float(params.get('delta', DEFAULT_DELTA))
+    dropped_eps = float(params.get('dropped_eps', DEFAULT_DROPPED_EPS))
+    window      = int(params.get('window', DEFAULT_WINDOW))
     beats = _extract_beats_from_body(body)
 
     if beats:
-        # v2: use pre-computed beat intervals directly — no signal re-processing
-        valid_beats = [b for b in beats if not b.get('skipped') and b.get('r') is not None]
-        n_beats     = len(valid_beats)
-        r_arr       = np.array([float(b['r']) for b in valid_beats])
-
-        artifact_indices, artifact_time_ranges, beat_details, stats = \
-            _detect_rhythm_artifacts_v2(valid_beats, sigma)
-
+        # v2: R-peak times come from the segmentation stage — no signal re-processing
+        valid_beats        = [b for b in beats if not b.get('skipped') and b.get('r') is not None]
+        r_arr              = np.array([float(b['r']) for b in valid_beats], dtype=float)
         unreliable_indices = _get_unreliable_indices(valid_beats)
-        result = _build_type_result(artifact_indices, n_beats, r_arr, unreliable_indices, valid_beats)
-        result["artifact_time_ranges"] = artifact_time_ranges
-        result["beat_details"]         = beat_details
-        result["stats"]                = stats
     else:
-        # fallback: re-detect from raw signal via PreparedSignal
-        input_signal    = _extract_signal(body)
-        sampling_rate   = 500
-        prepared        = PreparedSignal(input_signal, sampling_rate)
-        r_peaks_sec     = (np.array(prepared.rpeaks["ECG_R_Peaks"]) / sampling_rate).tolist()
-        r_arr           = np.array(r_peaks_sec)
-        n_beats         = len(r_peaks_sec)
-        zone_intervals  = prepared.zone_intervals
-        zone_peak_times = prepared.zone_peak_times
+        # fallback: re-detect R-peaks from the raw signal
+        input_signal       = _extract_signal(body)
+        sampling_rate      = 500
+        prepared           = PreparedSignal(input_signal, sampling_rate)
+        r_arr              = np.array(prepared.rpeaks["ECG_R_Peaks"], dtype=float) / sampling_rate
+        valid_beats        = []
+        unreliable_indices = []
 
-        rr = np.diff(r_arr)
-        z, median_rr, mad_rr = mad_stats(rr)
-        rr_flags = set(int(i + 1) for i in range(len(z)) if z[i] > sigma)
-        scale = 1.4826 * mad_rr + 1e-9
-        rr_beat_details = [
-            {
-                "beat_idx":   int(i + 1),
-                "zone":       "ECG_R_Peaks",
-                "rr_interval": round(float(rr[i]), 4),
-                "z_score":    round(float(z[i]), 2),
-                "median_rr":  round(median_rr, 4),
-                "reason":     "RR interval outlier",
-            }
-            for i in range(len(z)) if z[i] > sigma
-        ]
+    n_beats    = int(len(r_arr))
+    classified = classify_rr_sequence(r_arr.tolist(), delta=delta, dropped_eps=dropped_eps, window=window)
+    # interval i (R_i → R_{i+1}) is attributed to beat i; the last beat has no following interval
+    classes = list(classified['classes']) + [CLASS_NORMAL] * (n_beats - len(classified['classes']))
+    artifact_indices = [i for i, c in enumerate(classes) if c != CLASS_NORMAL]
 
-        zone_per_zone, zone_flagged = detect_by_zone_intervals(zone_intervals, sigma)
-        zone_beat_details = [
-            {
-                "beat_idx":   d["beat_idx"],
-                "zone":       zone,
-                "rr_interval": d["interval"],
-                "z_score":    d["z_score"],
-                "median_rr":  d["median_interval"],
-                "reason":     f"{zone} interval outlier",
-            }
-            for zone, zdata in zone_per_zone.items()
-            for d in zdata.get("details", [])
-        ]
-
-        all_artifact_indices = sorted(rr_flags | set(zone_flagged))
-        beat_zone: dict[int, str] = {idx: "ECG_R_Peaks" for idx in rr_flags}
-        for zone, zdata in zone_per_zone.items():
-            for idx in zdata.get("flagged", []):
-                if idx not in beat_zone:
-                    beat_zone[idx] = zone
-
-        artifact_time_ranges = []
-        for idx in all_artifact_indices:
-            zone       = beat_zone.get(idx, "ECG_R_Peaks")
-            peak_times = zone_peak_times.get(zone, {})
-            start = peak_times.get(idx - 1, float(r_arr[idx - 1]) if idx > 0 else 0.0)
-            end   = peak_times.get(idx, float(r_arr[idx]))
-            artifact_time_ranges.append([start, end])
-
-        beat_details = rr_beat_details + [d for d in zone_beat_details if d["beat_idx"] not in rr_flags]
-        result = _build_type_result(all_artifact_indices, n_beats, r_arr, [], [])
-        result["artifact_time_ranges"] = artifact_time_ranges
-        result["beat_details"]         = beat_details
-        result["zone_flags"]           = {k: v["flagged"] for k, v in zone_per_zone.items() if v["flagged"]}
-        result["zone_details"]         = {k: v for k, v in zone_per_zone.items() if v["flagged"]}
-        result["stats"] = {
-            "median_rr":   round(median_rr, 4),
-            "mad":         round(mad_rr, 4),
-            "scale":       round(float(scale), 4),
-            "sigma":       sigma,
-            "n_intervals": int(len(rr)),
+    result = _build_type_result(artifact_indices, n_beats, r_arr, unreliable_indices, valid_beats)
+    result["artifact_time_ranges"] = [[float(r_arr[i]), float(r_arr[i + 1])] for i in artifact_indices]
+    result["artifact_classes"]     = [int(classes[i]) for i in artifact_indices]
+    result["classes"]              = [int(c) for c in classes]
+    result["class_names"]          = {str(k): v for k, v in CLASS_NAMES.items()}
+    result["beat_details"]         = [
+        {
+            "beat_idx":       d["beat_idx"],
+            "zone":           "ECG_R_Peaks",
+            "rr_interval":    d["rr"],
+            "t0":             d["t0"],
+            "ratio":          d["ratio"],
+            "deviation":      d["deviation"],
+            "cls":            d["cls"],
+            "class_name":     d["class_name"],
+            "dropped_cycles": d["dropped_cycles"],
+            "reason":         f"{d['class_name']} R-R interval",
         }
+        for d in classified['intervals'] if d["cls"] != CLASS_NORMAL
+    ]
+    result["stats"] = classified['stats']
 
-    n_flagged = sum(1 for f in result["flags"] if f == FLAG_ARTIFACT)
-    app.logger.info(f"Rhythm artifact detection: {n_flagged}/{n_beats} beats flagged (sigma={sigma})")
+    n_flagged = len(artifact_indices)
+    app.logger.info(f"Rhythm artifact detection: {n_flagged}/{n_beats} beats flagged (delta={delta})")
     return Response(json.dumps(result, ignore_nan=True), mimetype='application/json')
 
 
@@ -1394,11 +1358,29 @@ def simulate_ecg_from_math_stats():
             pa.get('random_zone_strategy'),
         ))
 
+    rhythm_artifacts = []
+    for ra in (body.get('rhythm_artifacts') or []):
+        rhythm_artifacts.append(RhythmArtifactConfig(
+            ra['class'],
+            ra.get('count_or_pos'),
+            ra.get('exact_placement', False),
+            ra.get('rr_ratio'),
+            ra.get('start'),
+            ra.get('length'),
+            ra.get('short_ratio'),
+            ra.get('long_ratio'),
+            ra.get('ratio_min'),
+            ra.get('ratio_max'),
+            ra.get('drop_probability'),
+            ra.get('tp_scale'),
+        ))
+
     sim = Simulation()
     generated, meta = sim.gen_ecg_from_math_stats(
         segments_count, mean_data, variance_data, rhythm_data, cfg,
         mean_7zones=mean_7zones, var_7zones=var_7zones, variance_scale=variance_scale,
         physio_artifacts=physio_artifacts or None,
+        rhythm_artifacts=rhythm_artifacts or None,
     )
 
     # intervals_cache[key] = data
